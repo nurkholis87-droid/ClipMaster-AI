@@ -105,7 +105,7 @@ class MainActivity : Activity() {
             setHintTextColor(muted)
             setTextColor(white)
             textSize = 14f
-            singleLine = true
+            setSingleLine(true)
             setPadding(dp(15), dp(15), dp(15), dp(15))
             background = rounded(card, 14)
         }
