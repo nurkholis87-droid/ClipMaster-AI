@@ -2,7 +2,6 @@ package com.clipmaster.ai
 
 import android.app.Activity
 import android.os.Bundle
-import android.content.Intent
 import android.net.Uri
 import android.graphics.Color
 import android.graphics.Typeface
@@ -15,6 +14,7 @@ import android.widget.*
 import org.json.JSONObject
 import java.net.URL
 import java.net.HttpURLConnection
+import java.net.URLEncoder
 import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
@@ -33,6 +33,7 @@ class MainActivity : Activity() {
     private lateinit var videoAuthor: TextView
     private lateinit var statusText: TextView
     private lateinit var analyzeButton: TextView
+    private lateinit var loadButton: TextView
 
     private var videoUrl = ""
     private var videoLoaded = false
@@ -59,8 +60,6 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(-1, 0, 1f)
         )
 
-        // HEADER
-
         content.addView(
             text("✂ ClipMaster AI", 28, cyan, true)
         )
@@ -70,8 +69,6 @@ class MainActivity : Activity() {
         )
 
         content.addView(space(25))
-
-        // HERO
 
         val hero = newCard()
 
@@ -91,10 +88,7 @@ class MainActivity : Activity() {
         )
 
         content.addView(hero)
-
         content.addView(space(25))
-
-        // YOUTUBE URL
 
         content.addView(
             section("01  •  YOUTUBE VIDEO URL")
@@ -111,20 +105,16 @@ class MainActivity : Activity() {
         }
 
         content.addView(urlInput)
-
         content.addView(space(12))
 
-        val loadButton = button("▶  LOAD VIDEO")
+        loadButton = button("▶  LOAD VIDEO")
 
         loadButton.setOnClickListener {
             loadVideo()
         }
 
         content.addView(loadButton)
-
         content.addView(space(15))
-
-        // VIDEO INFORMATION
 
         val infoCard = newCard()
 
@@ -148,10 +138,7 @@ class MainActivity : Activity() {
         infoCard.addView(videoAuthor)
 
         content.addView(infoCard)
-
         content.addView(space(25))
-
-        // AI ANALYSIS
 
         content.addView(
             section("02  •  AI CLIP DETECTION")
@@ -171,10 +158,7 @@ class MainActivity : Activity() {
         )
 
         content.addView(aiCard)
-
         content.addView(space(20))
-
-        // CLIP SETTINGS
 
         content.addView(
             section("03  •  CLIP SETTINGS")
@@ -185,16 +169,13 @@ class MainActivity : Activity() {
         )
 
         val ratioRow = horizontal()
-
         val ratios = listOf("9:16", "1:1", "16:9")
-
         var selectedRatio = "9:16"
 
         fun updateRatio() {
             ratioRow.removeAllViews()
 
             ratios.forEach { value ->
-
                 val item = option(
                     value,
                     selectedRatio == value
@@ -211,7 +192,6 @@ class MainActivity : Activity() {
 
         updateRatio()
         content.addView(ratioRow)
-
         content.addView(space(18))
 
         content.addView(
@@ -232,7 +212,6 @@ class MainActivity : Activity() {
             durationRow.removeAllViews()
 
             durations.forEach { value ->
-
                 val item = option(
                     value,
                     selectedDuration == value
@@ -249,28 +228,20 @@ class MainActivity : Activity() {
 
         updateDuration()
         content.addView(durationRow)
-
         content.addView(space(25))
 
-        // ANALYZE
-
         analyzeButton = button("✦  ANALYZE VIDEO")
-
         analyzeButton.alpha = 0.5f
 
         analyzeButton.setOnClickListener {
-
             if (!videoLoaded) {
                 toast("Load video terlebih dahulu")
             } else {
-                toast(
-                    "Tahap berikutnya: AI Video Analysis"
-                )
+                toast("Tahap berikutnya: AI Video Analysis")
             }
         }
 
         content.addView(analyzeButton)
-
         content.addView(space(15))
 
         statusText = text(
@@ -279,26 +250,21 @@ class MainActivity : Activity() {
         )
 
         statusText.gravity = Gravity.CENTER
-
         content.addView(statusText)
-
         content.addView(space(30))
 
-        // FOOTER
-
         val footer = text(
-            "CLIPMASTER AI v1.1.0\nCUT • EDIT • CREATE",
+            "CLIPMASTER AI v1.2.0\nCUT • EDIT • CREATE",
             11, muted, true
         )
 
         footer.gravity = Gravity.CENTER
-
         content.addView(footer)
 
         setContentView(root)
     }
 
-    // LOAD YOUTUBE INFORMATION
+    // LOAD VIDEO INFORMATION
 
     private fun loadVideo() {
 
@@ -307,16 +273,20 @@ class MainActivity : Activity() {
         val videoId = extractVideoId(input)
 
         if (videoId == null) {
-            toast("URL YouTube tidak valid")
+            toast("Format URL YouTube tidak valid")
             return
         }
 
         videoLoaded = false
         videoUrl = input
 
+        videoTitle.text = "Sedang membaca video..."
+        videoAuthor.text = "Menghubungi YouTube..."
+
         statusText.text = "LOADING VIDEO INFORMATION..."
 
         analyzeButton.alpha = 0.5f
+        loadButton.alpha = 0.5f
 
         val imm = getSystemService(
             Context.INPUT_METHOD_SERVICE
@@ -328,40 +298,56 @@ class MainActivity : Activity() {
 
         executor.execute {
 
+            var connection: HttpURLConnection? = null
+
             try {
 
+                val canonicalUrl =
+                    "https://www.youtube.com/watch?v=$videoId"
+
+                val encodedUrl = URLEncoder.encode(
+                    canonicalUrl,
+                    "UTF-8"
+                )
+
                 val apiUrl =
-                    "https://www.youtube.com/oembed?url=" +
-                    Uri.encode(
-                        "https://www.youtube.com/watch?v=$videoId"
-                    ) +
-                    "&format=json"
+                    "https://www.youtube.com/oembed?url=$encodedUrl&format=json"
 
-                val connection =
-                    URL(apiUrl).openConnection()
-                        as HttpURLConnection
+                connection =
+                    URL(apiUrl).openConnection() as HttpURLConnection
 
-                connection.connectTimeout = 15000
-                connection.readTimeout = 15000
+                connection.connectTimeout = 20000
+                connection.readTimeout = 20000
                 connection.requestMethod = "GET"
+
+                connection.setRequestProperty(
+                    "Accept",
+                    "application/json"
+                )
+
+                connection.setRequestProperty(
+                    "User-Agent",
+                    "Mozilla/5.0"
+                )
+
+                val responseCode = connection.responseCode
+
+                if (responseCode != HttpURLConnection.HTTP_OK) {
+                    throw Exception("HTTP $responseCode")
+                }
 
                 val response = connection.inputStream
                     .bufferedReader()
                     .use { it.readText() }
 
-                connection.disconnect()
-
                 val json = JSONObject(response)
 
-                val title = json.optString(
-                    "title",
-                    "Unknown title"
-                )
+                val title = json.optString("title", "")
+                val author = json.optString("author_name", "")
 
-                val author = json.optString(
-                    "author_name",
-                    "Unknown creator"
-                )
+                if (title.isBlank()) {
+                    throw Exception("Judul video tidak tersedia")
+                }
 
                 runOnUiThread {
 
@@ -371,26 +357,37 @@ class MainActivity : Activity() {
                     videoLoaded = true
 
                     analyzeButton.alpha = 1f
+                    loadButton.alpha = 1f
 
                     statusText.text =
                         "✓ VIDEO INFORMATION LOADED"
 
-                    toast("Video berhasil dimuat")
+                    toast("Informasi video berhasil dimuat")
                 }
 
             } catch (e: Exception) {
+
+                val errorMessage = e.message
+                    ?: "Kesalahan tidak diketahui"
 
                 runOnUiThread {
 
                     videoLoaded = false
 
+                    videoTitle.text = "Video belum berhasil dimuat"
+                    videoAuthor.text = errorMessage
+
+                    analyzeButton.alpha = 0.5f
+                    loadButton.alpha = 1f
+
                     statusText.text =
                         "VIDEO INFORMATION FAILED"
 
-                    toast(
-                        "Tidak dapat membaca informasi video"
-                    )
+                    toast("Gagal membaca video: $errorMessage")
                 }
+
+            } finally {
+                connection?.disconnect()
             }
         }
     }
@@ -401,33 +398,57 @@ class MainActivity : Activity() {
 
         return try {
 
-            val uri = Uri.parse(value)
+            var input = value.trim()
 
-            val host = uri.host ?: return null
+            if (input.isEmpty()) return null
+
+            if (!input.startsWith("http://") &&
+                !input.startsWith("https://")
+            ) {
+                input = "https://$input"
+            }
+
+            val uri = Uri.parse(input)
+
+            val host = uri.host
+                ?.lowercase()
+                ?: return null
 
             val id = when {
 
-                host.contains("youtu.be") ->
+                host == "youtu.be" ||
+                host == "www.youtu.be" ->
                     uri.lastPathSegment
 
-                host.contains("youtube.com") &&
-                    uri.path == "/watch" ->
-                    uri.getQueryParameter("v")
+                host == "youtube.com" ||
+                host == "www.youtube.com" ||
+                host == "m.youtube.com" ->
+                    when {
+                        uri.path == "/watch" ->
+                            uri.getQueryParameter("v")
 
-                host.contains("youtube.com") &&
-                    uri.path?.startsWith("/shorts/") == true ->
-                    uri.pathSegments.getOrNull(1)
+                        uri.path?.startsWith("/shorts/") == true ->
+                            uri.pathSegments.getOrNull(1)
 
-                host.contains("youtube.com") &&
-                    uri.path?.startsWith("/embed/") == true ->
-                    uri.pathSegments.getOrNull(1)
+                        uri.path?.startsWith("/embed/") == true ->
+                            uri.pathSegments.getOrNull(1)
+
+                        uri.path?.startsWith("/live/") == true ->
+                            uri.pathSegments.getOrNull(1)
+
+                        else -> null
+                    }
 
                 else -> null
             }
 
             if (id != null &&
                 id.matches(Regex("[A-Za-z0-9_-]{11}"))
-            ) id else null
+            ) {
+                id
+            } else {
+                null
+            }
 
         } catch (e: Exception) {
             null
@@ -435,16 +456,14 @@ class MainActivity : Activity() {
     }
 
     private fun toast(message: String) {
-
         Toast.makeText(
             this,
             message,
-            Toast.LENGTH_SHORT
+            Toast.LENGTH_LONG
         ).show()
     }
 
     private fun newCard(): LinearLayout {
-
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(
@@ -470,17 +489,17 @@ class MainActivity : Activity() {
             textSize = size.toFloat()
             setTextColor(color)
 
-            typeface = if (bold)
+            typeface = if (bold) {
                 Typeface.DEFAULT_BOLD
-            else
+            } else {
                 Typeface.DEFAULT
+            }
 
             setPadding(0, dp(5), 0, dp(5))
         }
     }
 
     private fun button(value: String): TextView {
-
         return TextView(this).apply {
             text = value
             textSize = 15f
@@ -530,7 +549,6 @@ class MainActivity : Activity() {
     }
 
     private fun weightParams(): LinearLayout.LayoutParams {
-
         return LinearLayout.LayoutParams(
             0,
             dp(48),
@@ -541,7 +559,6 @@ class MainActivity : Activity() {
     }
 
     private fun space(height: Int): View {
-
         return View(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 1,
