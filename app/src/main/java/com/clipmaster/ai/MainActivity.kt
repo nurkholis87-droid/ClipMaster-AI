@@ -9,436 +9,566 @@ import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.InputMethodManager
+import android.content.Context
 import android.widget.*
-import android.provider.OpenableColumns
+import org.json.JSONObject
+import java.net.URL
+import java.net.HttpURLConnection
+import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
 
-private val bg = Color.rgb(10, 16, 32)
-private val card = Color.rgb(22, 32, 55)
-private val blue = Color.rgb(35, 145, 255)
-private val cyan = Color.rgb(0, 220, 255)
-private val white = Color.WHITE
-private val muted = Color.rgb(155, 170, 195)
+    private val bg = Color.rgb(10, 16, 32)
+    private val card = Color.rgb(22, 32, 55)
+    private val blue = Color.rgb(35, 145, 255)
+    private val cyan = Color.rgb(0, 220, 255)
+    private val white = Color.WHITE
+    private val muted = Color.rgb(155, 170, 195)
 
-private var videoUri: Uri? = null
-private var ratio = "9:16"
-private var duration = "30 detik"
+    private val executor = Executors.newSingleThreadExecutor()
 
-private lateinit var videoInfo: TextView
+    private lateinit var urlInput: EditText
+    private lateinit var videoTitle: TextView
+    private lateinit var videoAuthor: TextView
+    private lateinit var statusText: TextView
+    private lateinit var analyzeButton: TextView
 
-override fun onCreate(savedInstanceState: Bundle?) {
-    super.onCreate(savedInstanceState)
+    private var videoUrl = ""
+    private var videoLoaded = false
 
-    val root = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setBackgroundColor(bg)
-    }
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
 
-    val scroll = ScrollView(this)
-
-    val content = LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-        setPadding(dp(20), dp(24), dp(20), dp(30))
-    }
-
-    scroll.addView(content)
-
-    root.addView(
-        scroll,
-        LinearLayout.LayoutParams(-1, 0, 1f)
-    )
-
-    // HEADER
-
-    content.addView(
-        text("✂ ClipMaster AI", 28, cyan, true)
-    )
-
-    content.addView(
-        text("AI VIDEO CLIP GENERATOR", 11, muted, true)
-    )
-
-    content.addView(space(25))
-
-    // HERO CARD
-
-    val hero = newCard()
-
-    hero.addView(
-        text("TURN LONG VIDEOS INTO", 13, muted, true)
-    )
-
-    hero.addView(
-        text("VIRAL SHORT CLIPS", 25, white, true)
-    )
-
-    hero.addView(
-        text(
-            "Ubah video panjang menjadi klip pendek untuk media sosial.",
-            14, muted, false
-        )
-    )
-
-    hero.addView(space(10))
-
-    hero.addView(
-        text("✦ AI POWERED VIDEO EDITING", 11, cyan, true)
-    )
-
-    content.addView(hero)
-
-    content.addView(space(24))
-
-    // VIDEO SELECTION
-
-    content.addView(section("01  •  PILIH VIDEO"))
-
-    val pickButton = button("＋  PILIH VIDEO DARI GALERI")
-
-    pickButton.setOnClickListener {
-
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
-            type = "video/*"
-            addCategory(Intent.CATEGORY_OPENABLE)
+        val root = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setBackgroundColor(bg)
         }
 
-        startActivityForResult(intent, 100)
-    }
+        val scroll = ScrollView(this)
 
-    content.addView(pickButton)
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(20), dp(25), dp(20), dp(30))
+        }
 
-    videoInfo = text(
-        "Belum ada video dipilih",
-        13, muted, false
-    )
+        scroll.addView(content)
 
-    content.addView(videoInfo)
+        root.addView(
+            scroll,
+            LinearLayout.LayoutParams(-1, 0, 1f)
+        )
 
-    content.addView(space(24))
+        // HEADER
 
-    // VIDEO RATIO
+        content.addView(
+            text("✂ ClipMaster AI", 28, cyan, true)
+        )
 
-    content.addView(section("02  •  FORMAT VIDEO"))
+        content.addView(
+            text("YOUTUBE VIDEO CLIP GENERATOR", 11, muted, true)
+        )
 
-    val ratioRow = horizontal()
+        content.addView(space(25))
 
-    updateRatio(ratioRow)
+        // HERO
 
-    content.addView(ratioRow)
+        val hero = newCard()
 
-    content.addView(space(24))
+        hero.addView(
+            text("TURN LONG VIDEOS INTO", 13, muted, true)
+        )
 
-    // VIDEO DURATION
+        hero.addView(
+            text("VIRAL SHORT CLIPS", 25, white, true)
+        )
 
-    content.addView(section("03  •  DURASI KLIP"))
+        hero.addView(
+            text(
+                "Temukan momen terbaik dan buat klip pendek dengan bantuan AI.",
+                14, muted, false
+            )
+        )
 
-    val durationRow = horizontal()
+        content.addView(hero)
 
-    updateDuration(durationRow)
+        content.addView(space(25))
 
-    content.addView(durationRow)
+        // YOUTUBE URL
 
-    content.addView(space(24))
+        content.addView(
+            section("01  •  YOUTUBE VIDEO URL")
+        )
 
-    // AI DETECTION
+        urlInput = EditText(this).apply {
+            hint = "Paste YouTube URL di sini..."
+            setHintTextColor(muted)
+            setTextColor(white)
+            textSize = 14f
+            singleLine = true
+            setPadding(dp(15), dp(15), dp(15), dp(15))
+            background = rounded(card, 14)
+        }
 
-    content.addView(section("04  •  AI CLIP DETECTION"))
+        content.addView(urlInput)
 
-    val aiCard = newCard()
+        content.addView(space(12))
 
-    aiCard.addView(
-        text("✦ Smart Clip Generator", 17, white, true)
-    )
+        val loadButton = button("▶  LOAD VIDEO")
 
-    aiCard.addView(
-        text(
-            "Siapkan video untuk proses pencarian momen menarik dan pembuatan klip.",
+        loadButton.setOnClickListener {
+            loadVideo()
+        }
+
+        content.addView(loadButton)
+
+        content.addView(space(15))
+
+        // VIDEO INFORMATION
+
+        val infoCard = newCard()
+
+        infoCard.addView(
+            text("VIDEO INFORMATION", 12, cyan, true)
+        )
+
+        infoCard.addView(space(10))
+
+        videoTitle = text(
+            "Belum ada video dimuat",
+            17, white, true
+        )
+
+        videoAuthor = text(
+            "Informasi kreator akan muncul di sini.",
             13, muted, false
         )
-    )
 
-    content.addView(aiCard)
+        infoCard.addView(videoTitle)
+        infoCard.addView(videoAuthor)
 
-    content.addView(space(28))
+        content.addView(infoCard)
 
-    // GENERATE BUTTON
+        content.addView(space(25))
 
-    val generateButton = button("✦  GENERATE CLIPS")
+        // AI ANALYSIS
 
-    generateButton.setOnClickListener {
+        content.addView(
+            section("02  •  AI CLIP DETECTION")
+        )
 
-        if (videoUri == null) {
+        val aiCard = newCard()
 
-            Toast.makeText(
-                this,
-                "Silakan pilih video terlebih dahulu",
-                Toast.LENGTH_SHORT
-            ).show()
+        aiCard.addView(
+            text("✦ SMART MOMENT DETECTION", 16, white, true)
+        )
 
-        } else {
-
-            Toast.makeText(
-                this,
-                "Pengaturan siap. Mesin AI sedang dikembangkan.",
-                Toast.LENGTH_LONG
-            ).show()
-        }
-    }
-
-    content.addView(generateButton)
-
-    content.addView(space(25))
-
-    // FOOTER
-
-    val footer = text(
-        "CLIPMASTER AI • VERSION 1.0.1\nCUT • EDIT • CREATE",
-        11, muted, true
-    )
-
-    footer.gravity = Gravity.CENTER
-
-    content.addView(footer)
-
-    setContentView(root)
-}
-
-// UPDATE RATIO
-
-private fun updateRatio(row: LinearLayout) {
-
-    row.removeAllViews()
-
-    listOf("9:16", "1:1", "16:9").forEach { value ->
-
-        val item = option(value, ratio == value)
-
-        item.setOnClickListener {
-            ratio = value
-            updateRatio(row)
-        }
-
-        row.addView(item, weightParams())
-    }
-}
-
-// UPDATE DURATION
-
-private fun updateDuration(row: LinearLayout) {
-
-    row.removeAllViews()
-
-    listOf("15 detik", "30 detik", "60 detik").forEach { value ->
-
-        val item = option(value, duration == value)
-
-        item.setOnClickListener {
-            duration = value
-            updateDuration(row)
-        }
-
-        row.addView(item, weightParams())
-    }
-}
-
-// VIDEO PICKER RESULT
-
-@Deprecated("Deprecated in Android API")
-override fun onActivityResult(
-    requestCode: Int,
-    resultCode: Int,
-    data: Intent?
-) {
-
-    super.onActivityResult(requestCode, resultCode, data)
-
-    if (
-        requestCode == 100 &&
-        resultCode == RESULT_OK &&
-        data?.data != null
-    ) {
-
-        videoUri = data.data
-
-        val uri = videoUri!!
-
-        var fileName = "Video berhasil dipilih"
-
-        contentResolver.query(
-            uri,
-            null,
-            null,
-            null,
-            null
-        )?.use { cursor ->
-
-            val index = cursor.getColumnIndex(
-                OpenableColumns.DISPLAY_NAME
+        aiCard.addView(
+            text(
+                "AI akan membantu menemukan kandidat momen menarik berdasarkan transkrip dan materi video yang boleh diproses.",
+                13, muted, false
             )
+        )
 
-            if (cursor.moveToFirst() && index >= 0) {
-                fileName = cursor.getString(index)
+        content.addView(aiCard)
+
+        content.addView(space(20))
+
+        // CLIP SETTINGS
+
+        content.addView(
+            section("03  •  CLIP SETTINGS")
+        )
+
+        content.addView(
+            text("Format video", 13, muted, true)
+        )
+
+        val ratioRow = horizontal()
+
+        val ratios = listOf("9:16", "1:1", "16:9")
+
+        var selectedRatio = "9:16"
+
+        fun updateRatio() {
+            ratioRow.removeAllViews()
+
+            ratios.forEach { value ->
+
+                val item = option(
+                    value,
+                    selectedRatio == value
+                )
+
+                item.setOnClickListener {
+                    selectedRatio = value
+                    updateRatio()
+                }
+
+                ratioRow.addView(item, weightParams())
             }
         }
 
-        videoInfo.text = "✓ VIDEO TERPILIH\n$fileName"
-        videoInfo.setTextColor(cyan)
-    }
-}
+        updateRatio()
+        content.addView(ratioRow)
 
-// CARD
+        content.addView(space(18))
 
-private fun newCard(): LinearLayout {
-
-    return LinearLayout(this).apply {
-        orientation = LinearLayout.VERTICAL
-
-        setPadding(
-            dp(18), dp(18), dp(18), dp(18)
+        content.addView(
+            text("Durasi klip", 13, muted, true)
         )
 
-        background = rounded(card, 20)
-    }
-}
+        val durationRow = horizontal()
 
-// SECTION
+        val durations = listOf(
+            "15 detik",
+            "30 detik",
+            "60 detik"
+        )
 
-private fun section(value: String): TextView {
-    return text(value, 14, cyan, true)
-}
+        var selectedDuration = "30 detik"
 
-// TEXT
+        fun updateDuration() {
+            durationRow.removeAllViews()
 
-private fun text(
-    value: String,
-    size: Int,
-    color: Int,
-    bold: Boolean
-): TextView {
+            durations.forEach { value ->
 
-    return TextView(this).apply {
+                val item = option(
+                    value,
+                    selectedDuration == value
+                )
 
-        text = value
-        textSize = size.toFloat()
-        setTextColor(color)
+                item.setOnClickListener {
+                    selectedDuration = value
+                    updateDuration()
+                }
 
-        typeface = if (bold) {
-            Typeface.DEFAULT_BOLD
-        } else {
-            Typeface.DEFAULT
+                durationRow.addView(item, weightParams())
+            }
         }
 
-        setPadding(0, dp(5), 0, dp(5))
-    }
-}
+        updateDuration()
+        content.addView(durationRow)
 
-// BUTTON
+        content.addView(space(25))
 
-private fun button(value: String): TextView {
+        // ANALYZE
 
-    return TextView(this).apply {
+        analyzeButton = button("✦  ANALYZE VIDEO")
 
-        text = value
-        textSize = 15f
-        gravity = Gravity.CENTER
+        analyzeButton.alpha = 0.5f
 
-        setTextColor(white)
-        typeface = Typeface.DEFAULT_BOLD
+        analyzeButton.setOnClickListener {
 
-        setPadding(
-            dp(12), dp(17), dp(12), dp(17)
+            if (!videoLoaded) {
+                toast("Load video terlebih dahulu")
+            } else {
+                toast(
+                    "Tahap berikutnya: AI Video Analysis"
+                )
+            }
+        }
+
+        content.addView(analyzeButton)
+
+        content.addView(space(15))
+
+        statusText = text(
+            "READY TO CREATE CLIPS",
+            12, cyan, true
         )
 
-        background = rounded(blue, 15)
-    }
-}
+        statusText.gravity = Gravity.CENTER
 
-// OPTION
+        content.addView(statusText)
 
-private fun option(
-    value: String,
-    selected: Boolean
-): TextView {
+        content.addView(space(30))
 
-    return TextView(this).apply {
+        // FOOTER
 
-        text = value
-        textSize = 12f
-        gravity = Gravity.CENTER
-
-        setTextColor(
-            if (selected) white else muted
+        val footer = text(
+            "CLIPMASTER AI v1.1.0\nCUT • EDIT • CREATE",
+            11, muted, true
         )
 
-        typeface = Typeface.DEFAULT_BOLD
+        footer.gravity = Gravity.CENTER
 
-        background = rounded(
-            if (selected) blue else card,
-            12
+        content.addView(footer)
+
+        setContentView(root)
+    }
+
+    // LOAD YOUTUBE INFORMATION
+
+    private fun loadVideo() {
+
+        val input = urlInput.text.toString().trim()
+
+        val videoId = extractVideoId(input)
+
+        if (videoId == null) {
+            toast("URL YouTube tidak valid")
+            return
+        }
+
+        videoLoaded = false
+        videoUrl = input
+
+        statusText.text = "LOADING VIDEO INFORMATION..."
+
+        analyzeButton.alpha = 0.5f
+
+        val imm = getSystemService(
+            Context.INPUT_METHOD_SERVICE
+        ) as InputMethodManager
+
+        imm.hideSoftInputFromWindow(
+            urlInput.windowToken, 0
         )
 
-        setPadding(
-            dp(4), dp(14), dp(4), dp(14)
-        )
+        executor.execute {
+
+            try {
+
+                val apiUrl =
+                    "https://www.youtube.com/oembed?url=" +
+                    Uri.encode(
+                        "https://www.youtube.com/watch?v=$videoId"
+                    ) +
+                    "&format=json"
+
+                val connection =
+                    URL(apiUrl).openConnection()
+                        as HttpURLConnection
+
+                connection.connectTimeout = 15000
+                connection.readTimeout = 15000
+                connection.requestMethod = "GET"
+
+                val response = connection.inputStream
+                    .bufferedReader()
+                    .use { it.readText() }
+
+                connection.disconnect()
+
+                val json = JSONObject(response)
+
+                val title = json.optString(
+                    "title",
+                    "Unknown title"
+                )
+
+                val author = json.optString(
+                    "author_name",
+                    "Unknown creator"
+                )
+
+                runOnUiThread {
+
+                    videoTitle.text = title
+                    videoAuthor.text = "Creator: $author"
+
+                    videoLoaded = true
+
+                    analyzeButton.alpha = 1f
+
+                    statusText.text =
+                        "✓ VIDEO INFORMATION LOADED"
+
+                    toast("Video berhasil dimuat")
+                }
+
+            } catch (e: Exception) {
+
+                runOnUiThread {
+
+                    videoLoaded = false
+
+                    statusText.text =
+                        "VIDEO INFORMATION FAILED"
+
+                    toast(
+                        "Tidak dapat membaca informasi video"
+                    )
+                }
+            }
+        }
     }
-}
 
-// HORIZONTAL LAYOUT
+    // EXTRACT YOUTUBE VIDEO ID
 
-private fun horizontal(): LinearLayout {
+    private fun extractVideoId(value: String): String? {
 
-    return LinearLayout(this).apply {
-        orientation = LinearLayout.HORIZONTAL
+        return try {
+
+            val uri = Uri.parse(value)
+
+            val host = uri.host ?: return null
+
+            val id = when {
+
+                host.contains("youtu.be") ->
+                    uri.lastPathSegment
+
+                host.contains("youtube.com") &&
+                    uri.path == "/watch" ->
+                    uri.getQueryParameter("v")
+
+                host.contains("youtube.com") &&
+                    uri.path?.startsWith("/shorts/") == true ->
+                    uri.pathSegments.getOrNull(1)
+
+                host.contains("youtube.com") &&
+                    uri.path?.startsWith("/embed/") == true ->
+                    uri.pathSegments.getOrNull(1)
+
+                else -> null
+            }
+
+            if (id != null &&
+                id.matches(Regex("[A-Za-z0-9_-]{11}"))
+            ) id else null
+
+        } catch (e: Exception) {
+            null
+        }
     }
-}
 
-// WEIGHT PARAMS
+    private fun toast(message: String) {
 
-private fun weightParams(): LinearLayout.LayoutParams {
-
-    return LinearLayout.LayoutParams(
-        0,
-        dp(48),
-        1f
-    ).apply {
-        marginEnd = dp(6)
+        Toast.makeText(
+            this,
+            message,
+            Toast.LENGTH_SHORT
+        ).show()
     }
-}
 
-// SPACE
+    private fun newCard(): LinearLayout {
 
-private fun space(height: Int): View {
-
-    return View(this).apply {
-
-        layoutParams = LinearLayout.LayoutParams(
-            1,
-            dp(height)
-        )
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(
+                dp(18), dp(18), dp(18), dp(18)
+            )
+            background = rounded(card, 20)
+        }
     }
-}
 
-// ROUNDED BACKGROUND
-
-private fun rounded(
-    color: Int,
-    radius: Int
-): GradientDrawable {
-
-    return GradientDrawable().apply {
-        setColor(color)
-        cornerRadius = dp(radius).toFloat()
+    private fun section(value: String): TextView {
+        return text(value, 14, cyan, true)
     }
-}
 
-// DP
+    private fun text(
+        value: String,
+        size: Int,
+        color: Int,
+        bold: Boolean
+    ): TextView {
 
-private fun dp(value: Int): Int {
+        return TextView(this).apply {
+            text = value
+            textSize = size.toFloat()
+            setTextColor(color)
 
-    return (
-        value * resources.displayMetrics.density
-    ).toInt()
-}
+            typeface = if (bold)
+                Typeface.DEFAULT_BOLD
+            else
+                Typeface.DEFAULT
 
+            setPadding(0, dp(5), 0, dp(5))
+        }
+    }
+
+    private fun button(value: String): TextView {
+
+        return TextView(this).apply {
+            text = value
+            textSize = 15f
+            gravity = Gravity.CENTER
+            setTextColor(white)
+            typeface = Typeface.DEFAULT_BOLD
+
+            setPadding(
+                dp(12), dp(17), dp(12), dp(17)
+            )
+
+            background = rounded(blue, 15)
+        }
+    }
+
+    private fun option(
+        value: String,
+        selected: Boolean
+    ): TextView {
+
+        return TextView(this).apply {
+            text = value
+            textSize = 12f
+            gravity = Gravity.CENTER
+
+            setTextColor(
+                if (selected) white else muted
+            )
+
+            typeface = Typeface.DEFAULT_BOLD
+
+            background = rounded(
+                if (selected) blue else card,
+                12
+            )
+
+            setPadding(
+                dp(4), dp(14), dp(4), dp(14)
+            )
+        }
+    }
+
+    private fun horizontal(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+        }
+    }
+
+    private fun weightParams(): LinearLayout.LayoutParams {
+
+        return LinearLayout.LayoutParams(
+            0,
+            dp(48),
+            1f
+        ).apply {
+            marginEnd = dp(6)
+        }
+    }
+
+    private fun space(height: Int): View {
+
+        return View(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                1,
+                dp(height)
+            )
+        }
+    }
+
+    private fun rounded(
+        color: Int,
+        radius: Int
+    ): GradientDrawable {
+
+        return GradientDrawable().apply {
+            setColor(color)
+            cornerRadius = dp(radius).toFloat()
+        }
+    }
+
+    private fun dp(value: Int): Int {
+        return (
+            value * resources.displayMetrics.density
+        ).toInt()
+    }
+
+    override fun onDestroy() {
+        executor.shutdownNow()
+        super.onDestroy()
+    }
 }
