@@ -26,7 +26,6 @@ private var ratio = "9:16"
 private var duration = "30 detik"
 
 private lateinit var videoInfo: TextView
-private lateinit var generateButton: TextView
 
 override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
@@ -44,11 +43,10 @@ override fun onCreate(savedInstanceState: Bundle?) {
     }
 
     scroll.addView(content)
+
     root.addView(
         scroll,
-        LinearLayout.LayoutParams(
-            -1, 0, 1f
-        )
+        LinearLayout.LayoutParams(-1, 0, 1f)
     )
 
     // HEADER
@@ -94,13 +92,12 @@ override fun onCreate(savedInstanceState: Bundle?) {
 
     // VIDEO SELECTION
 
-    content.addView(
-        section("01  •  PILIH VIDEO")
-    )
+    content.addView(section("01  •  PILIH VIDEO"))
 
     val pickButton = button("＋  PILIH VIDEO DARI GALERI")
 
     pickButton.setOnClickListener {
+
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             type = "video/*"
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -120,59 +117,33 @@ override fun onCreate(savedInstanceState: Bundle?) {
 
     content.addView(space(24))
 
-    // FORMAT
+    // VIDEO RATIO
 
-    content.addView(
-        section("02  •  FORMAT VIDEO")
-    )
+    content.addView(section("02  •  FORMAT VIDEO"))
 
     val ratioRow = horizontal()
 
-    listOf("9:16", "1:1", "16:9").forEach { value ->
-
-        val item = option(value, ratio == value)
-
-        item.setOnClickListener {
-            ratio = value
-            updateRatio(ratioRow)
-        }
-
-        ratioRow.addView(item, weightParams())
-    }
+    updateRatio(ratioRow)
 
     content.addView(ratioRow)
 
     content.addView(space(24))
 
-    // DURATION
+    // VIDEO DURATION
 
-    content.addView(
-        section("03  •  DURASI KLIP")
-    )
+    content.addView(section("03  •  DURASI KLIP"))
 
     val durationRow = horizontal()
 
-    listOf("15 detik", "30 detik", "60 detik").forEach { value ->
-
-        val item = option(value, duration == value)
-
-        item.setOnClickListener {
-            duration = value
-            updateDuration(durationRow)
-        }
-
-        durationRow.addView(item, weightParams())
-    }
+    updateDuration(durationRow)
 
     content.addView(durationRow)
 
     content.addView(space(24))
 
-    // AI FEATURE
+    // AI DETECTION
 
-    content.addView(
-        section("04  •  AI CLIP DETECTION")
-    )
+    content.addView(section("04  •  AI CLIP DETECTION"))
 
     val aiCard = newCard()
 
@@ -193,7 +164,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
 
     // GENERATE BUTTON
 
-    generateButton = button("✦  GENERATE CLIPS")
+    val generateButton = button("✦  GENERATE CLIPS")
 
     generateButton.setOnClickListener {
 
@@ -209,10 +180,9 @@ override fun onCreate(savedInstanceState: Bundle?) {
 
             Toast.makeText(
                 this,
-                "Pengaturan siap. Mesin AI sedang dalam tahap pengembangan.",
+                "Pengaturan siap. Mesin AI sedang dikembangkan.",
                 Toast.LENGTH_LONG
             ).show()
-
         }
     }
 
@@ -223,7 +193,7 @@ override fun onCreate(savedInstanceState: Bundle?) {
     // FOOTER
 
     val footer = text(
-        "CLIPMASTER AI  •  VERSION 1.0.0\nCUT  •  EDIT  •  CREATE",
+        "CLIPMASTER AI • VERSION 1.0.1\nCUT • EDIT • CREATE",
         11, muted, true
     )
 
@@ -234,16 +204,18 @@ override fun onCreate(savedInstanceState: Bundle?) {
     setContentView(root)
 }
 
+// UPDATE RATIO
+
 private fun updateRatio(row: LinearLayout) {
 
     row.removeAllViews()
 
-    listOf("9:16", "1:1", "16:9").forEach {
+    listOf("9:16", "1:1", "16:9").forEach { value ->
 
-        val item = option(it, ratio == it)
+        val item = option(value, ratio == value)
 
         item.setOnClickListener {
-            ratio = it
+            ratio = value
             updateRatio(row)
         }
 
@@ -251,16 +223,18 @@ private fun updateRatio(row: LinearLayout) {
     }
 }
 
+// UPDATE DURATION
+
 private fun updateDuration(row: LinearLayout) {
 
     row.removeAllViews()
 
-    listOf("15 detik", "30 detik", "60 detik").forEach {
+    listOf("15 detik", "30 detik", "60 detik").forEach { value ->
 
-        val item = option(it, duration == it)
+        val item = option(value, duration == value)
 
         item.setOnClickListener {
-            duration = it
+            duration = value
             updateDuration(row)
         }
 
@@ -268,15 +242,19 @@ private fun updateDuration(row: LinearLayout) {
     }
 }
 
+// VIDEO PICKER RESULT
+
 @Deprecated("Deprecated in Android API")
 override fun onActivityResult(
     requestCode: Int,
     resultCode: Int,
     data: Intent?
 ) {
+
     super.onActivityResult(requestCode, resultCode, data)
 
-    if (requestCode == 100 &&
+    if (
+        requestCode == 100 &&
         resultCode == RESULT_OK &&
         data?.data != null
     ) {
@@ -309,20 +287,28 @@ override fun onActivityResult(
     }
 }
 
+// CARD
+
 private fun newCard(): LinearLayout {
 
     return LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
+
         setPadding(
             dp(18), dp(18), dp(18), dp(18)
         )
+
         background = rounded(card, 20)
     }
 }
 
+// SECTION
+
 private fun section(value: String): TextView {
     return text(value, 14, cyan, true)
 }
+
+// TEXT
 
 private fun text(
     value: String,
@@ -332,25 +318,31 @@ private fun text(
 ): TextView {
 
     return TextView(this).apply {
+
         text = value
         textSize = size.toFloat()
         setTextColor(color)
 
-        typeface = if (bold)
+        typeface = if (bold) {
             Typeface.DEFAULT_BOLD
-        else
+        } else {
             Typeface.DEFAULT
+        }
 
         setPadding(0, dp(5), 0, dp(5))
     }
 }
 
+// BUTTON
+
 private fun button(value: String): TextView {
 
     return TextView(this).apply {
+
         text = value
         textSize = 15f
         gravity = Gravity.CENTER
+
         setTextColor(white)
         typeface = Typeface.DEFAULT_BOLD
 
@@ -362,12 +354,15 @@ private fun button(value: String): TextView {
     }
 }
 
+// OPTION
+
 private fun option(
     value: String,
     selected: Boolean
 ): TextView {
 
     return TextView(this).apply {
+
         text = value
         textSize = 12f
         gravity = Gravity.CENTER
@@ -389,11 +384,16 @@ private fun option(
     }
 }
 
+// HORIZONTAL LAYOUT
+
 private fun horizontal(): LinearLayout {
+
     return LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
     }
 }
+
+// WEIGHT PARAMS
 
 private fun weightParams(): LinearLayout.LayoutParams {
 
@@ -406,15 +406,20 @@ private fun weightParams(): LinearLayout.LayoutParams {
     }
 }
 
+// SPACE
+
 private fun space(height: Int): View {
 
     return View(this).apply {
+
         layoutParams = LinearLayout.LayoutParams(
             1,
             dp(height)
         )
     }
 }
+
+// ROUNDED BACKGROUND
 
 private fun rounded(
     color: Int,
@@ -427,7 +432,10 @@ private fun rounded(
     }
 }
 
+// DP
+
 private fun dp(value: Int): Int {
+
     return (
         value * resources.displayMetrics.density
     ).toInt()
