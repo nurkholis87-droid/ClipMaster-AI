@@ -3,11 +3,11 @@ package com.clipmaster.ai
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
+import android.media.MediaExtractor
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
-import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
@@ -76,7 +76,7 @@ class MainActivity : AppCompatActivity() {
         buildInterface()
 
         addLog("ClipMaster AI siap digunakan")
-        addLog("Versi 2.0.0")
+        addLog("Versi 2.1.0")
         addLog("Mode: AUTO HIGHLIGHT 30 DETIK")
     }
 
@@ -140,21 +140,15 @@ class MainActivity : AppCompatActivity() {
 
         val modeInfo = TextView(this).apply {
             text = "AUTO HIGHLIGHT 30 DETIK\n\n" +
-                    "Aplikasi menganalisis aktivitas visual video " +
-                    "dan memilih bagian dengan perubahan visual paling tinggi."
+                    "Aplikasi menganalisis perubahan visual video " +
+                    "dan memilih bagian dengan aktivitas visual paling tinggi."
             textSize = 14f
             setTextColor(android.graphics.Color.rgb(190, 205, 225))
             setPadding(14, 14, 14, 14)
             setBackgroundColor(android.graphics.Color.rgb(20, 29, 45))
         }
 
-        root.addView(
-            modeInfo,
-            LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            )
-        )
+        root.addView(modeInfo)
 
         createButton = Button(this).apply {
             text = "BUAT AUTO CLIP 30 DETIK"
@@ -165,7 +159,6 @@ class MainActivity : AppCompatActivity() {
 
         val createParams = buttonParams()
         createParams.topMargin = 20
-
         root.addView(createButton, createParams)
 
         statusText = TextView(this).apply {
@@ -261,7 +254,21 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
+    // Membaca durasi langsung dari URI video asli.
     private fun getVideoDuration(uri: Uri): String {
+
+        val duration = readDurationFromUri(uri)
+
+        if (duration <= 0L) {
+            return "Tidak diketahui"
+        }
+
+        val seconds = duration / 1000
+
+        return "${seconds / 60} menit ${seconds % 60} detik"
+    }
+
+    private fun readDurationFromUri(uri: Uri): Long {
 
         val retriever = MediaMetadataRetriever()
 
@@ -269,17 +276,13 @@ class MainActivity : AppCompatActivity() {
 
             retriever.setDataSource(this, uri)
 
-            val duration = retriever.extractMetadata(
+            retriever.extractMetadata(
                 MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
 
-            val seconds = duration / 1000
-
-            "${seconds / 60} menit ${seconds % 60} detik"
-
         } catch (e: Exception) {
 
-            "Tidak diketahui"
+            0L
 
         } finally {
 
@@ -288,6 +291,114 @@ class MainActivity : AppCompatActivity() {
             } catch (_: Exception) {
             }
         }
+    }
+
+    // Cadangan pertama: membaca durasi dari file sementara.
+    private fun readDurationFromFile(file: File): Long {
+
+        val retriever = MediaMetadataRetriever()
+
+        return try {
+
+            retriever.setDataSource(file.absolutePath)
+
+            retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull() ?: 0L
+
+        } catch (e: Exception) {
+
+            0L
+
+        } finally {
+
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    // Cadangan kedua: membaca durasi menggunakan MediaExtractor.
+    private fun readDurationFromExtractor(file: File): Long {
+
+        val extractor = MediaExtractor()
+
+        return try {
+
+            extractor.setDataSource(file.absolutePath)
+
+            var longestDurationUs = 0L
+
+            for (index in 0 until extractor.trackCount) {
+
+                val format = extractor.getTrackFormat(index)
+
+                if (format.containsKey(
+                        android.media.MediaFormat.KEY_DURATION
+                    )
+                ) {
+
+                    val durationUs = format.getLong(
+                        android.media.MediaFormat.KEY_DURATION
+                    )
+
+                    if (durationUs > longestDurationUs) {
+                        longestDurationUs = durationUs
+                    }
+                }
+            }
+
+            longestDurationUs / 1000L
+
+        } catch (e: Exception) {
+
+            0L
+
+        } finally {
+
+            try {
+                extractor.release()
+            } catch (_: Exception) {
+            }
+        }
+    }
+
+    private fun getReliableDuration(
+        uri: Uri,
+        file: File
+    ): Long {
+
+        addLog("Metode 1: membaca durasi dari video asli")
+
+        var duration = readDurationFromUri(uri)
+
+        if (duration > 0L) {
+            addLog("Durasi berhasil dibaca dari URI")
+            return duration
+        }
+
+        addLog("Metode 1 gagal, mencoba file sementara")
+
+        duration = readDurationFromFile(file)
+
+        if (duration > 0L) {
+            addLog("Durasi berhasil dibaca dari file sementara")
+            return duration
+        }
+
+        addLog("Metode 2 gagal, mencoba MediaExtractor")
+
+        duration = readDurationFromExtractor(file)
+
+        if (duration > 0L) {
+            addLog("Durasi berhasil dibaca menggunakan MediaExtractor")
+            return duration
+        }
+
+        addLog("Semua metode pembacaan durasi gagal")
+
+        return 0L
     }
 
     private fun requestOutputFile() {
@@ -324,15 +435,18 @@ class MainActivity : AppCompatActivity() {
 
         executor.execute {
 
-            var inputFile: File? = null
-            var outputFile: File? = null
+            var temporaryInput: File? = null
+            var temporaryOutput: File? = null
 
             try {
 
                 addLog("Menyalin video ke penyimpanan sementara")
 
-                inputFile = File(cacheDir, "clipmaster_input.mp4")
-                outputFile = File(cacheDir, "clipmaster_output.mp4")
+                val inputFile = File(cacheDir, "clipmaster_input.mp4")
+                val outputFile = File(cacheDir, "clipmaster_output.mp4")
+
+                temporaryInput = inputFile
+                temporaryOutput = outputFile
 
                 inputFile.delete()
                 outputFile.delete()
@@ -348,14 +462,21 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
+                if (!inputFile.exists() || inputFile.length() <= 0L) {
+                    throw Exception("File video sementara kosong")
+                }
+
                 addLog("Input siap: ${inputFile.length()} bytes")
 
                 addLog("Membaca durasi video")
 
-                val durationMs = getLocalVideoDuration(inputFile)
+                val durationMs = getReliableDuration(inputUri, inputFile)
 
-                if (durationMs <= 0) {
-                    throw Exception("Durasi video tidak dapat dibaca")
+                if (durationMs <= 0L) {
+                    throw Exception(
+                        "Durasi video tidak dapat dibaca. " +
+                        "Coba pilih file video MP4 lain."
+                    )
                 }
 
                 val durationSeconds = durationMs / 1000.0
@@ -376,10 +497,9 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 if (durationSeconds < clipDurationSeconds) {
-
                     addLog(
                         "Video kurang dari 30 detik. " +
-                                "Akan menggunakan seluruh durasi sumber."
+                        "Menggunakan seluruh durasi sumber."
                     )
                 }
 
@@ -388,7 +508,17 @@ class MainActivity : AppCompatActivity() {
                 val bestStart = if (
                     durationSeconds > clipDurationSeconds
                 ) {
-                    findBestVisualMoment(inputFile, durationMs)
+
+                    try {
+                        findBestVisualMoment(inputFile, durationMs)
+                    } catch (e: Exception) {
+                        addLog(
+                            "Analisis visual tidak berhasil: ${e.message}"
+                        )
+                        addLog("Menggunakan bagian awal video")
+                        0.0
+                    }
+
                 } else {
                     0.0
                 }
@@ -445,7 +575,7 @@ class MainActivity : AppCompatActivity() {
                         if (
                             success &&
                             outputFile.exists() &&
-                            outputFile.length() > 0
+                            outputFile.length() > 0L
                         ) {
 
                             try {
@@ -498,7 +628,6 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
 
                         addLog("ERROR HASIL: ${e.message}")
-
                         updateStatus("Status: ERROR", false)
 
                     } finally {
@@ -519,34 +648,13 @@ class MainActivity : AppCompatActivity() {
 
                 updateStatus("Status: ERROR", false)
 
-                inputFile?.delete()
-                outputFile?.delete()
+                temporaryInput?.delete()
+                temporaryOutput?.delete()
 
                 runOnUiThread {
                     pickButton.isEnabled = true
                     createButton.isEnabled = true
                 }
-            }
-        }
-    }
-
-    private fun getLocalVideoDuration(file: File): Long {
-
-        val retriever = MediaMetadataRetriever()
-
-        return try {
-
-            retriever.setDataSource(file.absolutePath)
-
-            retriever.extractMetadata(
-                MediaMetadataRetriever.METADATA_KEY_DURATION
-            )?.toLongOrNull() ?: 0L
-
-        } finally {
-
-            try {
-                retriever.release()
-            } catch (_: Exception) {
             }
         }
     }
@@ -584,7 +692,7 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 val bitmap = retriever.getFrameAtTime(
-                    timeMs * 1000,
+                    timeMs * 1000L,
                     MediaMetadataRetriever.OPTION_CLOSEST
                 )
 
@@ -636,7 +744,9 @@ class MainActivity : AppCompatActivity() {
                 previousPixels = currentPixels
 
                 if (index % 30 == 0) {
-                    addLog("Analisis visual: sampel ${index + 1}/$sampleCount")
+                    addLog(
+                        "Analisis visual: sampel ${index + 1}/$sampleCount"
+                    )
                 }
             }
 
@@ -649,7 +759,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         if (scores.isEmpty()) {
-            addLog("Analisis visual tidak menemukan data cukup")
+            addLog("Data visual tidak cukup")
             return 0.0
         }
 
@@ -696,14 +806,13 @@ class MainActivity : AppCompatActivity() {
             index += step
         }
 
-        // Periksa juga posisi terakhir agar bagian akhir video tidak terlewat.
         if (bestIndex != lastPossibleStart) {
 
             var total = 0.0
 
             for (
                 i in lastPossibleStart until
-                        min(scores.size, lastPossibleStart + windowIntervals)
+                min(scores.size, lastPossibleStart + windowIntervals)
             ) {
                 total += scores[i]
             }
@@ -736,12 +845,12 @@ class MainActivity : AppCompatActivity() {
 
                 val sourceX = min(
                     bitmap.width - 1,
-                    (x * bitmap.width / columns)
+                    x * bitmap.width / columns
                 )
 
                 val sourceY = min(
                     bitmap.height - 1,
-                    (y * bitmap.height / rows)
+                    y * bitmap.height / rows
                 )
 
                 pixels[y * columns + x] = bitmap.getPixel(
@@ -758,6 +867,8 @@ class MainActivity : AppCompatActivity() {
 
         runOnUiThread {
 
+            if (!::logText.isInitialized) return@runOnUiThread
+
             val time = java.text.SimpleDateFormat(
                 "HH:mm:ss",
                 Locale.getDefault()
@@ -773,6 +884,8 @@ class MainActivity : AppCompatActivity() {
     ) {
 
         runOnUiThread {
+
+            if (!::statusText.isInitialized) return@runOnUiThread
 
             statusText.text = message
 
