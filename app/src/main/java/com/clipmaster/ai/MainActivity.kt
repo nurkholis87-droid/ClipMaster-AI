@@ -2,8 +2,6 @@ package com.clipmaster.ai
 
 import android.app.Activity
 import android.content.Intent
-import android.graphics.Bitmap
-import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
@@ -14,14 +12,16 @@ import androidx.appcompat.app.AppCompatActivity
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
+import java.io.DataInputStream
+import java.io.EOFException
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.Locale
 import java.util.concurrent.Executors
-import kotlin.math.abs
-import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
@@ -74,10 +74,9 @@ class MainActivity : AppCompatActivity() {
         buildInterface()
 
         addLog("ClipMaster AI siap")
-        addLog("Versi 2.3.0")
-        addLog("AUTO HIGHLIGHT 30 DETIK")
-        addLog("Mesin durasi: FFprobe")
-        addLog("Mesin analisis: Visual Window Scoring")
+        addLog("Versi 2.4.0")
+        addLog("AUTO PODCAST HIGHLIGHT")
+        addLog("Analisis audio: PCM 8000 Hz")
     }
 
     private fun buildInterface() {
@@ -100,7 +99,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(TextView(this).apply {
-            text = "AUTO HIGHLIGHT • SMART CLIPPING"
+            text = "PODCAST HIGHLIGHT • SMART CLIPPING"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(android.graphics.Color.LTGRAY)
@@ -131,9 +130,9 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(TextView(this).apply {
-            text = "AUTO HIGHLIGHT 30 DETIK\n\n" +
-                    "Menganalisis perubahan visual pada video " +
-                    "untuk mencari bagian dengan aktivitas tertinggi."
+            text = "AUTO PODCAST HIGHLIGHT 30 DETIK\n\n" +
+                    "Menganalisis intensitas suara untuk mencari " +
+                    "bagian percakapan yang paling aktif."
             textSize = 14f
             setTextColor(android.graphics.Color.rgb(190, 205, 225))
             setPadding(14, 14, 14, 14)
@@ -237,14 +236,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun getVideoDuration(uri: Uri): String {
 
-        val retriever = MediaMetadataRetriever()
+        val retriever =
+            android.media.MediaMetadataRetriever()
 
         return try {
 
             retriever.setDataSource(this, uri)
 
             val duration = retriever.extractMetadata(
-                MediaMetadataRetriever.METADATA_KEY_DURATION
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
 
             if (duration <= 0L) {
@@ -277,14 +277,16 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        outputPicker.launch("ClipMaster_AutoHighlight_30s.mp4")
+        outputPicker.launch("ClipMaster_PodcastHighlight_30s.mp4")
     }
 
     private fun getDurationWithFFprobe(file: File): Long {
 
         addLog("Memeriksa durasi menggunakan FFprobe")
 
-        val session = FFprobeKit.getMediaInformation(file.absolutePath)
+        val session =
+            FFprobeKit.getMediaInformation(file.absolutePath)
+
         val information = session.mediaInformation
 
         if (information == null) {
@@ -297,11 +299,10 @@ class MainActivity : AppCompatActivity() {
             return 0L
         }
 
-        val durationText = information.duration
+        val seconds =
+            information.duration?.toDoubleOrNull() ?: 0.0
 
-        addLog("Data durasi FFprobe: $durationText")
-
-        val seconds = durationText?.toDoubleOrNull() ?: 0.0
+        addLog("Durasi FFprobe: $seconds detik")
 
         return if (seconds > 0.0) {
             (seconds * 1000.0).toLong()
@@ -318,19 +319,20 @@ class MainActivity : AppCompatActivity() {
         var duration = getDurationWithFFprobe(file)
 
         if (duration > 0L) {
-            addLog("Durasi berhasil dibaca oleh FFprobe")
+            addLog("Durasi berhasil dibaca FFprobe")
             return duration
         }
 
-        addLog("FFprobe gagal, mencoba metadata URI")
+        addLog("Mencoba metadata URI")
 
-        val retriever = MediaMetadataRetriever()
+        val retriever =
+            android.media.MediaMetadataRetriever()
 
         try {
             retriever.setDataSource(this, uri)
 
             duration = retriever.extractMetadata(
-                MediaMetadataRetriever.METADATA_KEY_DURATION
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
 
         } catch (e: Exception) {
@@ -342,20 +344,18 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        if (duration > 0L) {
-            addLog("Durasi berhasil dibaca dari URI")
-            return duration
-        }
+        if (duration > 0L) return duration
 
         addLog("Mencoba metadata file sementara")
 
-        val fileRetriever = MediaMetadataRetriever()
+        val fileRetriever =
+            android.media.MediaMetadataRetriever()
 
         try {
             fileRetriever.setDataSource(file.absolutePath)
 
             duration = fileRetriever.extractMetadata(
-                MediaMetadataRetriever.METADATA_KEY_DURATION
+                android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
 
         } catch (e: Exception) {
@@ -368,6 +368,228 @@ class MainActivity : AppCompatActivity() {
         }
 
         return duration
+    }
+
+    private fun extractAudioPcm(
+        inputFile: File,
+        pcmFile: File
+    ): Boolean {
+
+        pcmFile.delete()
+
+        addLog("Mengekstrak audio podcast")
+        addLog("Mengubah audio menjadi PCM mono 8000 Hz")
+
+        val command =
+            "-y " +
+            "-i \"${inputFile.absolutePath}\" " +
+            "-map 0:a:0 " +
+            "-vn " +
+            "-ac 1 " +
+            "-ar 8000 " +
+            "-c:a pcm_s16le " +
+            "-f s16le " +
+            "\"${pcmFile.absolutePath}\""
+
+        val session = FFmpegKit.execute(command)
+
+        val success = ReturnCode.isSuccess(session.returnCode)
+
+        addLog("Ekstraksi audio selesai")
+        addLog("Return code audio: ${session.returnCode}")
+
+        if (!success) {
+            val logs = session.allLogsAsString
+            if (!logs.isNullOrBlank()) addLog(logs)
+            return false
+        }
+
+        return pcmFile.exists() && pcmFile.length() > 0L
+    }
+
+    private fun findBestAudioMoment(
+        pcmFile: File,
+        durationSeconds: Double
+    ): Double {
+
+        val sampleRate = 8000
+        val windowSeconds = 0.5
+
+        val samplesPerWindow =
+            (sampleRate * windowSeconds).toInt()
+
+        val bytesPerWindow = samplesPerWindow * 2
+
+        val windowScores = ArrayList<Double>()
+
+        addLog("Memulai analisis intensitas audio")
+
+        DataInputStream(
+            FileInputStream(pcmFile)
+        ).use { input ->
+
+            val buffer = ByteArray(bytesPerWindow)
+
+            while (true) {
+
+                var totalRead = 0
+
+                try {
+                    while (totalRead < buffer.size) {
+                        val count = input.read(
+                            buffer,
+                            totalRead,
+                            buffer.size - totalRead
+                        )
+
+                        if (count < 0) break
+                        totalRead += count
+                    }
+                } catch (_: Exception) {
+                    break
+                }
+
+                if (totalRead < bytesPerWindow) break
+
+                var sumSquares = 0.0
+
+                var index = 0
+
+                while (index < bytesPerWindow) {
+
+                    val low = buffer[index].toInt() and 0xFF
+                    val high = buffer[index + 1].toInt()
+
+                    val sample = (high shl 8) or low
+
+                    sumSquares += sample.toDouble() * sample
+                    index += 2
+                }
+
+                val rms = sqrt(
+                    sumSquares / samplesPerWindow
+                ) / 32768.0
+
+                windowScores.add(rms)
+
+                if (windowScores.size % 120 == 0) {
+                    val elapsed =
+                        windowScores.size * windowSeconds
+
+                    addLog(
+                        "Analisis audio: ${
+                            String.format(
+                                Locale.US,
+                                "%.1f",
+                                elapsed
+                            )
+                        } detik"
+                    )
+                }
+            }
+        }
+
+        addLog("Jumlah jendela audio: ${windowScores.size}")
+
+        val clipWindows =
+            (clipDurationSeconds / windowSeconds).toInt()
+
+        if (windowScores.size < clipWindows) {
+            addLog("Data audio kurang untuk analisis 30 detik")
+            return 0.0
+        }
+
+        val prefix = DoubleArray(windowScores.size + 1)
+
+        for (i in windowScores.indices) {
+            prefix[i + 1] =
+                prefix[i] + windowScores[i]
+        }
+
+        var bestIndex = 0
+        var bestScore = Double.NEGATIVE_INFINITY
+        var bestAverageRms = 0.0
+        var bestActiveRatio = 0.0
+
+        val lastStart =
+            windowScores.size - clipWindows
+
+        addLog("Membandingkan seluruh kandidat 30 detik")
+
+        for (start in 0..lastStart) {
+
+            val end = start + clipWindows
+
+            val total =
+                prefix[end] - prefix[start]
+
+            val averageRms =
+                total / clipWindows
+
+            var activeWindows = 0
+
+            for (i in start until end) {
+                if (windowScores[i] >= 0.012) {
+                    activeWindows++
+                }
+            }
+
+            val activeRatio =
+                activeWindows.toDouble() / clipWindows
+
+            // Kombinasi intensitas suara dan konsistensi aktivitas.
+            val score =
+                (averageRms * 0.65) +
+                (activeRatio * 0.035)
+
+            if (score > bestScore) {
+
+                bestScore = score
+                bestIndex = start
+                bestAverageRms = averageRms
+                bestActiveRatio = activeRatio
+            }
+        }
+
+        addLog(
+            "Rata-rata intensitas terbaik: ${
+                String.format(Locale.US, "%.5f", bestAverageRms)
+            }"
+        )
+
+        addLog(
+            "Aktivitas suara: ${
+                String.format(
+                    Locale.US,
+                    "%.1f",
+                    bestActiveRatio * 100
+                )
+            }%"
+        )
+
+        addLog(
+            "Skor audio terbaik: ${
+                String.format(Locale.US, "%.5f", bestScore)
+            }"
+        )
+
+        if (bestAverageRms < 0.003) {
+
+            addLog("Audio terlalu senyap untuk dipilih")
+            addLog("Menggunakan bagian tengah sebagai cadangan")
+
+            return max(
+                0.0,
+                (durationSeconds - clipDurationSeconds) / 2.0
+            )
+        }
+
+        val startSeconds =
+            bestIndex * windowSeconds
+
+        addLog("Highlight audio berhasil ditemukan")
+
+        return startSeconds
     }
 
     private fun startProcessing(outputUri: Uri) {
@@ -383,23 +605,31 @@ class MainActivity : AppCompatActivity() {
         logText.text = ""
 
         addLog("--------------------------------")
-        addLog("MEMULAI AUTO HIGHLIGHT")
+        addLog("MEMULAI PODCAST AUTO HIGHLIGHT")
         addLog("Target durasi: 30 detik")
 
         executor.execute {
 
             var inputFile: File? = null
             var outputFile: File? = null
+            var pcmFile: File? = null
 
             try {
 
                 addLog("Menyalin video ke penyimpanan sementara")
 
-                inputFile = File(cacheDir, "clipmaster_input.mp4")
-                outputFile = File(cacheDir, "clipmaster_output.mp4")
+                inputFile =
+                    File(cacheDir, "clipmaster_input.mp4")
+
+                outputFile =
+                    File(cacheDir, "clipmaster_output.mp4")
+
+                pcmFile =
+                    File(cacheDir, "clipmaster_audio.pcm")
 
                 inputFile.delete()
                 outputFile.delete()
+                pcmFile.delete()
 
                 contentResolver.openInputStream(inputUri).use { input ->
 
@@ -418,17 +648,23 @@ class MainActivity : AppCompatActivity() {
 
                 addLog("Input siap: ${inputFile.length()} bytes")
 
-                val durationMs = getReliableDuration(inputUri, inputFile)
+                val durationMs =
+                    getReliableDuration(inputUri, inputFile)
 
                 if (durationMs <= 0L) {
                     throw Exception("Durasi video tidak dapat dibaca")
                 }
 
-                val durationSeconds = durationMs / 1000.0
+                val durationSeconds =
+                    durationMs / 1000.0
 
                 addLog(
                     "Durasi sumber: ${
-                        String.format(Locale.US, "%.2f", durationSeconds)
+                        String.format(
+                            Locale.US,
+                            "%.2f",
+                            durationSeconds
+                        )
                     } detik"
                 )
 
@@ -437,33 +673,64 @@ class MainActivity : AppCompatActivity() {
                     durationSeconds
                 )
 
-                if (durationSeconds < clipDurationSeconds) {
+                val bestStart: Double
+
+                if (durationSeconds <= clipDurationSeconds) {
+
                     addLog("Video kurang dari 30 detik")
                     addLog("Menggunakan seluruh durasi sumber")
-                }
 
-                addLog("Memulai analisis visual")
+                    bestStart = 0.0
 
-                val bestStart = if (
-                    durationSeconds > clipDurationSeconds
-                ) {
-                    try {
-                        findBestVisualMoment(inputFile, durationMs)
-                    } catch (e: Exception) {
-                        addLog("Analisis visual gagal: ${e.message}")
+                } else {
+
+                    val audioReady = extractAudioPcm(
+                        inputFile,
+                        pcmFile
+                    )
+
+                    bestStart = if (audioReady) {
+
+                        try {
+                            findBestAudioMoment(
+                                pcmFile,
+                                durationSeconds
+                            )
+                        } catch (e: Exception) {
+
+                            addLog(
+                                "Analisis audio gagal: ${e.message}"
+                            )
+
+                            addLog(
+                                "Menggunakan bagian tengah video"
+                            )
+
+                            max(
+                                0.0,
+                                (durationSeconds - actualDuration) / 2.0
+                            )
+                        }
+
+                    } else {
+
+                        addLog("Audio tidak berhasil diekstrak")
                         addLog("Menggunakan bagian tengah video")
+
                         max(
                             0.0,
                             (durationSeconds - actualDuration) / 2.0
                         )
                     }
-                } else {
-                    0.0
                 }
 
                 addLog(
                     "Bagian terpilih: ${
-                        String.format(Locale.US, "%.2f", bestStart)
+                        String.format(
+                            Locale.US,
+                            "%.2f",
+                            bestStart
+                        )
                     } detik"
                 )
 
@@ -501,9 +768,8 @@ class MainActivity : AppCompatActivity() {
 
                     try {
 
-                        val success = ReturnCode.isSuccess(
-                            session.returnCode
-                        )
+                        val success =
+                            ReturnCode.isSuccess(session.returnCode)
 
                         addLog("FFmpeg selesai")
                         addLog("Return code: ${session.returnCode}")
@@ -516,18 +782,19 @@ class MainActivity : AppCompatActivity() {
 
                             addLog("Menyimpan hasil video")
 
-                            contentResolver.openOutputStream(outputUri).use { output ->
+                            contentResolver
+                                .openOutputStream(outputUri).use { output ->
 
-                                if (output == null) {
-                                    throw Exception(
-                                        "Tidak dapat membuka lokasi penyimpanan"
-                                    )
-                                }
+                                    if (output == null) {
+                                        throw Exception(
+                                            "Tidak dapat membuka lokasi penyimpanan"
+                                        )
+                                    }
 
-                                outputFile.inputStream().use { input ->
-                                    input.copyTo(output)
+                                    outputFile.inputStream().use { input ->
+                                        input.copyTo(output)
+                                    }
                                 }
-                            }
 
                             addLog("AUTO CLIP BERHASIL DISIMPAN")
 
@@ -540,7 +807,8 @@ class MainActivity : AppCompatActivity() {
 
                             addLog("FFmpeg gagal")
 
-                            val errorLogs = session.allLogsAsString
+                            val errorLogs =
+                                session.allLogsAsString
 
                             if (!errorLogs.isNullOrBlank()) {
                                 addLog(errorLogs)
@@ -558,6 +826,7 @@ class MainActivity : AppCompatActivity() {
 
                         inputFile.delete()
                         outputFile.delete()
+                        pcmFile.delete()
 
                         runOnUiThread {
                             pickButton.isEnabled = true
@@ -574,6 +843,7 @@ class MainActivity : AppCompatActivity() {
 
                 inputFile?.delete()
                 outputFile?.delete()
+                pcmFile?.delete()
 
                 runOnUiThread {
                     pickButton.isEnabled = true
@@ -581,212 +851,6 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-    }
-
-    private fun findBestVisualMoment(
-        file: File,
-        durationMs: Long
-    ): Double {
-
-        val retriever = MediaMetadataRetriever()
-
-        val intervalMs = max(2000L, durationMs / 1799L)
-
-        val sampleCount = min(
-            1800,
-            (durationMs / intervalMs).toInt() + 1
-        )
-
-        val scores = ArrayList<Double>()
-        var previousPixels: IntArray? = null
-        var successfulFrames = 0
-
-        try {
-
-            retriever.setDataSource(file.absolutePath)
-
-            for (index in 0 until sampleCount) {
-
-                val timeMs = min(index * intervalMs, durationMs)
-
-                val bitmap = retriever.getFrameAtTime(
-                    timeMs * 1000L,
-                    MediaMetadataRetriever.OPTION_CLOSEST
-                )
-
-                if (bitmap == null) {
-                    previousPixels = null
-                    continue
-                }
-
-                successfulFrames++
-
-                val currentPixels = samplePixels(bitmap)
-                bitmap.recycle()
-
-                val previous = previousPixels
-
-                if (previous != null) {
-
-                    var difference = 0.0
-
-                    for (i in currentPixels.indices) {
-
-                        val oldPixel = previous[i]
-                        val newPixel = currentPixels[i]
-
-                        val oldR = (oldPixel shr 16) and 0xFF
-                        val oldG = (oldPixel shr 8) and 0xFF
-                        val oldB = oldPixel and 0xFF
-
-                        val newR = (newPixel shr 16) and 0xFF
-                        val newG = (newPixel shr 8) and 0xFF
-                        val newB = newPixel and 0xFF
-
-                        difference += (
-                            abs(newR - oldR) +
-                            abs(newG - oldG) +
-                            abs(newB - oldB)
-                        ) / 3.0
-                    }
-
-                    val score =
-                        difference / currentPixels.size / 255.0
-
-                    scores.add(score)
-                }
-
-                previousPixels = currentPixels
-
-                if (index % 30 == 0) {
-                    addLog("Analisis visual: ${index + 1}/$sampleCount")
-                }
-            }
-
-        } finally {
-            try {
-                retriever.release()
-            } catch (_: Exception) {
-            }
-        }
-
-        addLog("Frame berhasil dianalisis: $successfulFrames")
-        addLog("Jumlah skor perubahan visual: ${scores.size}")
-
-        if (scores.isEmpty()) {
-            addLog("Tidak ada skor visual yang bisa dihitung")
-            return max(
-                0.0,
-                (durationMs / 1000.0 - clipDurationSeconds) / 2.0
-            )
-        }
-
-        val windowIntervals = max(
-            1,
-            ceil(
-                clipDurationSeconds * 1000.0 / intervalMs
-            ).toInt()
-        )
-
-        val lastPossibleStart = min(
-            scores.size - windowIntervals,
-            (
-                (durationMs - clipDurationSeconds * 1000L) /
-                    intervalMs
-                ).toInt()
-        )
-
-        if (lastPossibleStart <= 0) {
-            addLog("Durasi tidak cukup untuk membandingkan jendela")
-            return 0.0
-        }
-
-        // Prefix sum agar seluruh kandidat bisa dibandingkan cepat.
-        val prefix = DoubleArray(scores.size + 1)
-
-        for (i in scores.indices) {
-            prefix[i + 1] = prefix[i] + scores[i]
-        }
-
-        var bestIndex = 0
-        var bestScore = Double.NEGATIVE_INFINITY
-
-        // Memeriksa setiap kemungkinan posisi awal.
-        for (index in 0..lastPossibleStart) {
-
-            val endIndex = min(
-                scores.size,
-                index + windowIntervals
-            )
-
-            val count = endIndex - index
-
-            if (count <= 0) continue
-
-            val total = prefix[endIndex] - prefix[index]
-            val average = total / count
-
-            if (average > bestScore) {
-                bestScore = average
-                bestIndex = index
-            }
-        }
-
-        addLog(
-            "Skor aktivitas terbaik: ${
-                String.format(Locale.US, "%.5f", bestScore)
-            }"
-        )
-
-        // Skor terlalu rendah berarti perubahan visual sangat kecil.
-        // Gunakan bagian tengah agar tidak mengklaim ada highlight.
-        val minimumActivityScore = 0.015
-
-        if (bestScore < minimumActivityScore) {
-
-            addLog("Aktivitas visual terlalu rendah")
-            addLog("Menggunakan bagian tengah sebagai cadangan")
-
-            return max(
-                0.0,
-                (durationMs / 1000.0 - clipDurationSeconds) / 2.0
-            )
-        }
-
-        val selectedStart = bestIndex * intervalMs / 1000.0
-
-        addLog("Highlight ditemukan berdasarkan aktivitas visual")
-
-        return selectedStart
-    }
-
-    private fun samplePixels(bitmap: Bitmap): IntArray {
-
-        val columns = 32
-        val rows = 18
-        val pixels = IntArray(columns * rows)
-
-        for (y in 0 until rows) {
-            for (x in 0 until columns) {
-
-                val sourceX = min(
-                    bitmap.width - 1,
-                    x * bitmap.width / columns
-                )
-
-                val sourceY = min(
-                    bitmap.height - 1,
-                    y * bitmap.height / rows
-                )
-
-                pixels[y * columns + x] = bitmap.getPixel(
-                    sourceX,
-                    sourceY
-                )
-            }
-        }
-
-        return pixels
     }
 
     private fun addLog(message: String) {
