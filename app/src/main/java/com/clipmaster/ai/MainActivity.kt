@@ -1,4 +1,3 @@
-
 package com.clipmaster.ai
 
 import android.app.Activity
@@ -8,7 +7,6 @@ import android.net.Uri
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
-import android.media.MediaMetadataRetriever
 import android.view.Gravity
 import android.view.View
 import android.widget.*
@@ -26,12 +24,15 @@ class MainActivity : Activity() {
     private val cyan = Color.rgb(0, 220, 255)
     private val white = Color.WHITE
     private val muted = Color.rgb(155, 170, 195)
+    private val green = Color.rgb(70, 220, 140)
+    private val red = Color.rgb(255, 100, 100)
 
     private lateinit var videoInfo: TextView
     private lateinit var status: TextView
     private lateinit var selectButton: TextView
     private lateinit var clipButton: TextView
-    private lateinit var durationSpinner: Spinner
+    private lateinit var logView: TextView
+    private lateinit var logScroll: ScrollView
     private lateinit var progress: ProgressBar
 
     private var selectedUri: Uri? = null
@@ -47,9 +48,12 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         buildInterface()
+        addLog("ClipMaster AI v1.2.0 dimulai")
+        addLog("FFmpeg diagnostic system siap")
     }
+
+    // MAIN INTERFACE
 
     private fun buildInterface() {
 
@@ -72,39 +76,24 @@ class MainActivity : Activity() {
             LinearLayout.LayoutParams(-1, 0, 1f)
         )
 
-        content.addView(
-            text("✂ ClipMaster AI", 28, cyan, true)
-        )
-
-        content.addView(
-            text("LOCAL VIDEO CLIP GENERATOR", 11, muted, true)
-        )
-
-        content.addView(space(25))
+        content.addView(text("✂ ClipMaster AI", 28, cyan, true))
+        content.addView(text("LOCAL VIDEO CLIP GENERATOR", 11, muted, true))
+        content.addView(space(22))
 
         val hero = newCard()
-
-        hero.addView(
-            text("TURN LONG VIDEOS INTO", 13, muted, true)
-        )
-
-        hero.addView(
-            text("SHORT VIDEO CLIPS", 25, white, true)
-        )
-
+        hero.addView(text("TURN LONG VIDEOS INTO", 13, muted, true))
+        hero.addView(text("SHORT VIDEO CLIPS", 25, white, true))
         hero.addView(
             text(
-                "Pilih video, tentukan durasi, dan buat klip MP4 secara otomatis.",
+                "Pilih video dan buat klip MP4 menggunakan mesin FFmpeg.",
                 14, muted, false
             )
         )
 
         content.addView(hero)
-        content.addView(space(25))
+        content.addView(space(22))
 
-        content.addView(
-            section("01 • SELECT VIDEO")
-        )
+        content.addView(section("01 • SELECT VIDEO"))
 
         selectButton = button("▶  PILIH VIDEO DARI HP")
 
@@ -113,15 +102,10 @@ class MainActivity : Activity() {
         }
 
         content.addView(selectButton)
-        content.addView(space(15))
+        content.addView(space(12))
 
         val infoCard = newCard()
-
-        infoCard.addView(
-            text("VIDEO INFORMATION", 12, cyan, true)
-        )
-
-        infoCard.addView(space(8))
+        infoCard.addView(text("VIDEO INFORMATION", 12, cyan, true))
 
         videoInfo = text(
             "Belum ada video dipilih.",
@@ -129,38 +113,32 @@ class MainActivity : Activity() {
         )
 
         infoCard.addView(videoInfo)
-
         content.addView(infoCard)
-        content.addView(space(25))
+        content.addView(space(22))
 
-        content.addView(
-            section("02 • CLIP SETTINGS")
-        )
+        content.addView(section("02 • CLIP SETTINGS"))
+        content.addView(text("Durasi klip", 13, muted, true))
 
-        content.addView(
-            text("Pilih durasi klip", 13, muted, true)
-        )
+        val spinner = Spinner(this)
 
-        durationSpinner = Spinner(this)
-
-        val durationAdapter = ArrayAdapter(
+        val adapter = ArrayAdapter(
             this,
             android.R.layout.simple_spinner_item,
             listOf("15 detik", "30 detik", "60 detik")
         )
 
-        durationAdapter.setDropDownViewResource(
+        adapter.setDropDownViewResource(
             android.R.layout.simple_spinner_dropdown_item
         )
 
-        durationSpinner.adapter = durationAdapter
-        durationSpinner.setSelection(1)
+        spinner.adapter = adapter
+        spinner.setSelection(1)
 
-        durationSpinner.onItemSelectedListener =
+        spinner.onItemSelectedListener =
             object : AdapterView.OnItemSelectedListener {
 
                 override fun onItemSelected(
-                    parent: AdapterView<*>?,
+                    parent: android.widget.AdapterView<*>?,
                     view: View?,
                     position: Int,
                     id: Long
@@ -170,40 +148,23 @@ class MainActivity : Activity() {
                         1 -> 30
                         else -> 60
                     }
+
+                    addLog("Durasi klip dipilih: $selectedDuration detik")
                 }
 
                 override fun onNothingSelected(
-                    parent: AdapterView<*>?
+                    parent: android.widget.AdapterView<*>?
                 ) {}
             }
 
-        content.addView(durationSpinner)
-        content.addView(space(25))
-
-        content.addView(
-            section("03 • CREATE CLIP")
-        )
-
-        val processCard = newCard()
-
-        processCard.addView(
-            text("✦ FFmpeg VIDEO ENGINE", 16, white, true)
-        )
-
-        processCard.addView(
-            text(
-                "Mesin pemrosesan akan memotong video dan menghasilkan file MP4 dengan format H.264 dan AAC.",
-                13, muted, false
-            )
-        )
-
-        content.addView(processCard)
+        content.addView(spinner)
         content.addView(space(20))
 
-        clipButton = button("✦  CREATE VIDEO CLIP")
+        content.addView(section("03 • CREATE CLIP"))
 
-        clipButton.alpha = 0.5f
+        clipButton = button("✦  CREATE VIDEO CLIP")
         clipButton.isEnabled = false
+        clipButton.alpha = 0.5f
 
         clipButton.setOnClickListener {
             createClip()
@@ -218,31 +179,90 @@ class MainActivity : Activity() {
 
         content.addView(progress)
 
-        status = text(
-            "READY TO CREATE CLIPS",
-            12, cyan, true
-        )
-
+        status = text("READY TO CREATE CLIPS", 12, cyan, true)
         status.gravity = Gravity.CENTER
 
         content.addView(status)
-        content.addView(space(30))
+        content.addView(space(25))
+
+        // DIAGNOSTIC PANEL
+
+        content.addView(section("04 • DIAGNOSTIC LOG"))
+
+        val diagnosticCard = newCard()
+
+        val logHeader = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val logTitle = text(
+            "FFmpeg Activity Log",
+            14, cyan, true
+        )
+
+        logHeader.addView(
+            logTitle,
+            LinearLayout.LayoutParams(0, -2, 1f)
+        )
+
+        val clearButton = TextView(this).apply {
+            text = "CLEAR LOG"
+            textSize = 10f
+            setTextColor(white)
+            gravity = Gravity.CENTER
+            setPadding(dp(10), dp(8), dp(10), dp(8))
+            background = rounded(blue, 8)
+
+            setOnClickListener {
+                logView.text = ""
+                addLog("Log dibersihkan")
+            }
+        }
+
+        logHeader.addView(clearButton)
+        diagnosticCard.addView(logHeader)
+        diagnosticCard.addView(space(10))
+
+        logScroll = ScrollView(this).apply {
+            setBackgroundColor(Color.rgb(5, 10, 20))
+        }
+
+        logView = TextView(this).apply {
+            text = ""
+            textSize = 10f
+            setTextColor(Color.rgb(190, 210, 225))
+            typeface = Typeface.MONOSPACE
+            setPadding(dp(12), dp(12), dp(12), dp(12))
+            setTextIsSelectable(true)
+        }
+
+        logScroll.addView(logView)
+
+        diagnosticCard.addView(
+            logScroll,
+            LinearLayout.LayoutParams(-1, dp(280))
+        )
+
+        content.addView(diagnosticCard)
+        content.addView(space(20))
 
         val footer = text(
-            "CLIPMASTER AI v1.1.0\nCUT • EDIT • CREATE",
+            "CLIPMASTER AI v1.2.0\nCUT • EDIT • CREATE",
             11, muted, true
         )
 
         footer.gravity = Gravity.CENTER
-
         content.addView(footer)
 
         setContentView(root)
     }
 
-    // SELECT VIDEO
+    // VIDEO PICKER
 
     private fun pickVideo() {
+
+        if (processing) return
 
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
@@ -252,7 +272,7 @@ class MainActivity : Activity() {
         startActivityForResult(intent, PICK_VIDEO)
     }
 
-    // RECEIVE SELECTED VIDEO
+    // RECEIVE VIDEO AND SAVE RESULT
 
     override fun onActivityResult(
         requestCode: Int,
@@ -262,6 +282,9 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
 
         if (resultCode != RESULT_OK || data?.data == null) {
+            if (requestCode == SAVE_VIDEO) {
+                addLog("Penyimpanan dibatalkan pengguna")
+            }
             return
         }
 
@@ -271,90 +294,63 @@ class MainActivity : Activity() {
 
                 val uri = data.data!!
 
+                try {
+                    contentResolver.takePersistableUriPermission(
+                        uri,
+                        Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    )
+                } catch (_: Exception) {}
+
                 selectedUri = uri
-
-                try {
-                    val retriever = MediaMetadataRetriever()
-
-                    retriever.setDataSource(this, uri)
-
-                    videoDuration = retriever
-                        .extractMetadata(
-                            MediaMetadataRetriever.METADATA_KEY_DURATION
-                        )
-                        ?.toLongOrNull() ?: 0L
-
-                    retriever.release()
-
-                    val seconds = videoDuration / 1000
-
-                    videoInfo.text =
-                        "Video berhasil dipilih\n\n" +
-                        "Durasi: ${formatTime(seconds)}\n" +
-                        "Sumber: Penyimpanan HP"
-
-                    clipButton.isEnabled = true
-                    clipButton.alpha = 1f
-
-                    status.text = "✓ VIDEO READY"
-
-                    toast("Video berhasil dipilih")
-
-                } catch (e: Exception) {
-
-                    selectedUri = null
-                    clipButton.isEnabled = false
-                    clipButton.alpha = 0.5f
-
-                    videoInfo.text =
-                        "Tidak dapat membaca video: ${e.message}"
-
-                    status.text = "VIDEO ERROR"
-                }
+                readVideoInformation(uri)
             }
 
-            SAVE_VIDEO -> {
-
-                val output = pendingOutput
-
-                if (output == null || !output.exists()) {
-                    toast("File hasil tidak ditemukan")
-                    return
-                }
-
-                try {
-                    val destination = contentResolver
-                        .openOutputStream(data.data!!)
-
-                    if (destination == null) {
-                        throw Exception("Gagal membuka lokasi penyimpanan")
-                    }
-
-                    FileInputStream(output).use { input ->
-                        destination.use { out ->
-                            input.copyTo(out)
-                        }
-                    }
-
-                    status.text = "✓ CLIP BERHASIL DISIMPAN"
-
-                    toast("Video berhasil disimpan!")
-
-                } catch (e: Exception) {
-
-                    status.text = "SAVE FAILED"
-                    toast("Gagal menyimpan: ${e.message}")
-
-                } finally {
-
-                    output.delete()
-                    pendingOutput = null
-                }
-            }
+            SAVE_VIDEO -> saveOutput(data.data!!)
         }
     }
 
-    // CREATE CLIP USING FFMPEG
+    private fun readVideoInformation(uri: Uri) {
+
+        try {
+            val retriever = android.media.MediaMetadataRetriever()
+
+            retriever.setDataSource(this, uri)
+
+            videoDuration = retriever
+                .extractMetadata(
+                    android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
+                )?.toLongOrNull() ?: 0L
+
+            retriever.release()
+
+            val seconds = videoDuration / 1000
+
+            videoInfo.text =
+                "Video berhasil dipilih\n\n" +
+                "Durasi: ${formatTime(seconds)}\n" +
+                "Sumber: Penyimpanan HP"
+
+            clipButton.isEnabled = videoDuration > 0
+            clipButton.alpha = if (videoDuration > 0) 1f else 0.5f
+
+            status.text = "✓ VIDEO READY"
+
+            addLog("Video berhasil dipilih")
+            addLog("Durasi video: ${formatTime(seconds)}")
+
+        } catch (e: Exception) {
+
+            selectedUri = null
+            clipButton.isEnabled = false
+            clipButton.alpha = 0.5f
+
+            videoInfo.text = "Gagal membaca video: ${e.message}"
+
+            addLog("ERROR membaca video: ${e.message}")
+        }
+    }
+
+    // FFMPEG PROCESSING
 
     private fun createClip() {
 
@@ -367,14 +363,23 @@ class MainActivity : Activity() {
 
         if (processing) return
 
+        if (videoDuration < selectedDuration * 1000L) {
+            toast("Durasi video lebih pendek dari durasi klip")
+            addLog("ERROR: Durasi sumber terlalu pendek")
+            return
+        }
+
         processing = true
 
         clipButton.isEnabled = false
         selectButton.isEnabled = false
-
         progress.visibility = View.VISIBLE
 
         status.text = "MENYIAPKAN VIDEO..."
+
+        addLog("--------------------------------")
+        addLog("MEMULAI PROSES PEMOTONGAN")
+        addLog("Target durasi: $selectedDuration detik")
 
         Thread {
 
@@ -386,7 +391,10 @@ class MainActivity : Activity() {
                 inputFile = File(cacheDir, "clipmaster_input.mp4")
                 outputFile = File(cacheDir, "clipmaster_output.mp4")
 
+                inputFile.delete()
                 outputFile.delete()
+
+                addLog("Menyalin video ke penyimpanan sementara")
 
                 contentResolver.openInputStream(uri).use { input ->
 
@@ -400,18 +408,18 @@ class MainActivity : Activity() {
                 }
 
                 if (!inputFile.exists() || inputFile.length() == 0L) {
-                    throw Exception("File video kosong")
+                    throw Exception("File input kosong")
                 }
 
-                val duration = selectedDuration
+                addLog("Input siap: ${inputFile.length()} bytes")
 
                 val inputPath = inputFile.absolutePath
                 val outputPath = outputFile.absolutePath
 
                 val command =
                     "-y -i \"$inputPath\" " +
-                    "-t $duration " +
-                    "-map 0:v:0 -map '0:a?' " +
+                    "-t $selectedDuration " +
+                    "-map 0:v:0 -map 0:a? " +
                     "-c:v libx264 " +
                     "-preset veryfast " +
                     "-crf 23 " +
@@ -421,68 +429,97 @@ class MainActivity : Activity() {
                     "-movflags +faststart " +
                     "\"$outputPath\""
 
+                addLog("Menjalankan FFmpeg")
+                addLog("Perintah: $command")
+
                 runOnUiThread {
-                    status.text = "MEMPROSES VIDEO..."
+                    status.text = "FFMPEG PROCESSING..."
                 }
 
-                FFmpegKit.executeAsync(command) { session ->
+                FFmpegKit.executeAsync(
+                    command,
 
-                    val success = ReturnCode.isSuccess(
-                        session.returnCode
-                    )
+                    { session ->
 
-                    runOnUiThread {
+                        val returnCode = session.returnCode
 
-                        processing = false
+                        val success = ReturnCode.isSuccess(returnCode)
 
-                        progress.visibility = View.GONE
-                        selectButton.isEnabled = true
-                        clipButton.isEnabled = selectedUri != null
+                        val fullLog = session.allLogsAsString
 
-                        if (success &&
-                            outputFile.exists() &&
-                            outputFile.length() > 0
-                        ) {
+                        runOnUiThread {
 
-                            status.text = "✓ CLIP BERHASIL DIBUAT"
+                            addLog("--------------------------------")
+                            addLog("FFmpeg selesai")
+                            addLog("Return code: $returnCode")
 
-                            pendingOutput = outputFile
+                            if (success &&
+                                outputFile.exists() &&
+                                outputFile.length() > 0
+                            ) {
 
-                            saveClip()
+                                addLog("STATUS: BERHASIL")
+                                addLog(
+                                    "Ukuran output: ${outputFile.length()} bytes"
+                                )
 
-                        } else {
+                                status.text = "✓ CLIP BERHASIL DIBUAT"
 
-                            status.text = "VIDEO PROCESSING FAILED"
+                                pendingOutput = outputFile
+                                saveClip()
 
-                            outputFile.delete()
+                            } else {
 
-                            val error = session.failStackTrace
-                                ?: session.allLogsAsString
+                                addLog("STATUS: GAGAL")
 
-                            toast(
-                                "FFmpeg gagal: " +
-                                error.take(250)
-                            )
+                                if (fullLog.isNotBlank()) {
+                                    addLog("OUTPUT LOG:")
+                                    addLog(fullLog)
+                                }
+
+                                val fail = session.failStackTrace
+
+                                if (!fail.isNullOrBlank()) {
+                                    addLog("FAIL STACK TRACE:")
+                                    addLog(fail)
+                                }
+
+                                status.text = "FFMPEG PROCESSING FAILED"
+
+                                outputFile.delete()
+
+                                toast("FFmpeg gagal. Periksa DIAGNOSTIC LOG.")
+                            }
+
+                            finishProcessing()
                         }
 
                         inputFile.delete()
-                    }
-                }
+                    },
+
+                    { log ->
+
+                        val message = log.message
+
+                        if (message.isNotBlank()) {
+                            addLog("[FFmpeg] $message")
+                        }
+                    },
+
+                    null
+                )
 
             } catch (e: Exception) {
 
                 runOnUiThread {
 
-                    processing = false
-
-                    progress.visibility = View.GONE
-
-                    selectButton.isEnabled = true
-                    clipButton.isEnabled = selectedUri != null
+                    addLog("EXCEPTION: ${e.message}")
 
                     status.text = "PROCESSING ERROR"
 
                     toast("Error: ${e.message}")
+
+                    finishProcessing()
                 }
 
                 inputFile?.delete()
@@ -490,6 +527,19 @@ class MainActivity : Activity() {
             }
 
         }.start()
+    }
+
+    private fun finishProcessing() {
+
+        processing = false
+
+        progress.visibility = View.GONE
+
+        selectButton.isEnabled = true
+        clipButton.isEnabled = selectedUri != null
+
+        clipButton.alpha =
+            if (selectedUri != null) 1f else 0.5f
     }
 
     // SAVE OUTPUT
@@ -509,6 +559,70 @@ class MainActivity : Activity() {
         startActivityForResult(intent, SAVE_VIDEO)
     }
 
+    private fun saveOutput(uri: Uri) {
+
+        val output = pendingOutput
+
+        if (output == null || !output.exists()) {
+            addLog("ERROR: File output tidak ditemukan")
+            toast("File hasil tidak ditemukan")
+            return
+        }
+
+        try {
+
+            contentResolver.openOutputStream(uri).use { destination ->
+
+                if (destination == null) {
+                    throw Exception("Gagal membuka lokasi penyimpanan")
+                }
+
+                FileInputStream(output).use { input ->
+                    input.copyTo(destination)
+                }
+            }
+
+            addLog("Video berhasil disimpan")
+            addLog("Lokasi penyimpanan dipilih pengguna")
+
+            status.text = "✓ CLIP BERHASIL DISIMPAN"
+
+            toast("Video berhasil disimpan!")
+
+        } catch (e: Exception) {
+
+            addLog("SAVE ERROR: ${e.message}")
+
+            status.text = "SAVE FAILED"
+
+            toast("Gagal menyimpan: ${e.message}")
+
+        } finally {
+
+            output.delete()
+            pendingOutput = null
+        }
+    }
+
+    // DIAGNOSTIC LOG
+
+    private fun addLog(message: String) {
+
+        runOnUiThread {
+
+            val time = java.text.SimpleDateFormat(
+                "HH:mm:ss",
+                java.util.Locale.getDefault()
+            ).format(java.util.Date())
+
+            logView.append("[$time] $message\n")
+
+            logScroll.post {
+                logScroll.fullScroll(View.FOCUS_DOWN)
+            }
+        }
+    }
+
     private fun formatTime(seconds: Long): String {
 
         val hours = seconds / 3600
@@ -522,12 +636,8 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun toast(message: String) {
-        Toast.makeText(
-            this,
-            message,
-            Toast.LENGTH_LONG
-        ).show()
+    private fun section(value: String): TextView {
+        return text(value, 14, cyan, true)
     }
 
     private fun newCard(): LinearLayout {
@@ -541,10 +651,6 @@ class MainActivity : Activity() {
 
             background = rounded(card, 20)
         }
-    }
-
-    private fun section(value: String): TextView {
-        return text(value, 14, cyan, true)
     }
 
     private fun text(
@@ -608,16 +714,22 @@ class MainActivity : Activity() {
     ): GradientDrawable {
 
         return GradientDrawable().apply {
-
             setColor(color)
             cornerRadius = dp(radius).toFloat()
         }
     }
 
     private fun dp(value: Int): Int {
-
         return (
             value * resources.displayMetrics.density
         ).toInt()
+    }
+
+    private fun toast(message: String) {
+        Toast.makeText(
+            this,
+            message,
+            Toast.LENGTH_LONG
+        ).show()
     }
 }
