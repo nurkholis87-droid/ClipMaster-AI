@@ -3,7 +3,6 @@ package com.clipmaster.ai
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Bitmap
-import android.media.MediaExtractor
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Bundle
@@ -13,6 +12,7 @@ import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import com.arthenica.ffmpegkit.FFmpegKit
+import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
 import java.io.File
 import java.io.FileOutputStream
@@ -25,11 +25,10 @@ import kotlin.math.min
 class MainActivity : AppCompatActivity() {
 
     private val executor = Executors.newSingleThreadExecutor()
+    private val clipDurationSeconds = 30
 
     private var selectedVideoUri: Uri? = null
     private var selectedVideoName = "Belum ada video dipilih"
-
-    private val clipDurationSeconds = 30
 
     private lateinit var videoInfo: TextView
     private lateinit var statusText: TextView
@@ -48,12 +47,10 @@ class MainActivity : AppCompatActivity() {
                     selectedVideoUri = uri
                     selectedVideoName = getFileName(uri)
 
-                    val duration = getVideoDuration(uri)
-
                     videoInfo.text =
-                        "Video: $selectedVideoName\nDurasi sumber: $duration"
+                        "Video: $selectedVideoName\nDurasi: ${getVideoDuration(uri)}"
 
-                    addLog("Video berhasil dipilih: $selectedVideoName")
+                    addLog("Video dipilih: $selectedVideoName")
                 }
             }
         }
@@ -75,9 +72,10 @@ class MainActivity : AppCompatActivity() {
 
         buildInterface()
 
-        addLog("ClipMaster AI siap digunakan")
-        addLog("Versi 2.1.0")
-        addLog("Mode: AUTO HIGHLIGHT 30 DETIK")
+        addLog("ClipMaster AI siap")
+        addLog("Versi 2.2.0")
+        addLog("AUTO HIGHLIGHT 30 DETIK")
+        addLog("Mesin pembaca durasi: FFprobe")
     }
 
     private fun buildInterface() {
@@ -92,30 +90,24 @@ class MainActivity : AppCompatActivity() {
 
         scroll.addView(root)
 
-        val title = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "ClipMaster AI"
             textSize = 28f
-            setTextColor(android.graphics.Color.WHITE)
             gravity = Gravity.CENTER
-        }
+            setTextColor(android.graphics.Color.WHITE)
+        })
 
-        root.addView(title)
-
-        val subtitle = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "AUTO HIGHLIGHT • SMART CLIPPING"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(android.graphics.Color.LTGRAY)
             setPadding(0, 8, 0, 24)
-        }
-
-        root.addView(subtitle)
+        })
 
         pickButton = Button(this).apply {
             text = "PILIH VIDEO"
-            setOnClickListener {
-                openVideoPicker()
-            }
+            setOnClickListener { openVideoPicker() }
         }
 
         root.addView(pickButton, buttonParams())
@@ -129,32 +121,26 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(videoInfo)
 
-        val modeLabel = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "MODE PEMOTONGAN OTOMATIS"
             textSize = 14f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(0, 12, 0, 8)
-        }
+        })
 
-        root.addView(modeLabel)
-
-        val modeInfo = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "AUTO HIGHLIGHT 30 DETIK\n\n" +
                     "Aplikasi menganalisis perubahan visual video " +
-                    "dan memilih bagian dengan aktivitas visual paling tinggi."
+                    "dan memilih bagian dengan aktivitas visual tinggi."
             textSize = 14f
             setTextColor(android.graphics.Color.rgb(190, 205, 225))
             setPadding(14, 14, 14, 14)
             setBackgroundColor(android.graphics.Color.rgb(20, 29, 45))
-        }
-
-        root.addView(modeInfo)
+        })
 
         createButton = Button(this).apply {
             text = "BUAT AUTO CLIP 30 DETIK"
-            setOnClickListener {
-                requestOutputFile()
-            }
+            setOnClickListener { requestOutputFile() }
         }
 
         val createParams = buttonParams()
@@ -170,14 +156,12 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(statusText)
 
-        val logTitle = TextView(this).apply {
+        root.addView(TextView(this).apply {
             text = "DIAGNOSTIC LOG"
             textSize = 15f
             setTextColor(android.graphics.Color.WHITE)
             setPadding(0, 12, 0, 8)
-        }
-
-        root.addView(logTitle)
+        })
 
         logText = TextView(this).apply {
             text = ""
@@ -197,15 +181,13 @@ class MainActivity : AppCompatActivity() {
             )
         )
 
-        val clearButton = Button(this).apply {
+        root.addView(Button(this).apply {
             text = "BERSIHKAN LOG"
             setOnClickListener {
                 logText.text = ""
                 addLog("Log dibersihkan")
             }
-        }
-
-        root.addView(clearButton, buttonParams())
+        }, buttonParams())
 
         setContentView(scroll)
     }
@@ -218,12 +200,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun openVideoPicker() {
-
         val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
             addCategory(Intent.CATEGORY_OPENABLE)
             type = "video/*"
         }
-
         videoPicker.launch(intent)
     }
 
@@ -240,7 +220,6 @@ class MainActivity : AppCompatActivity() {
         )?.use { cursor ->
 
             if (cursor.moveToFirst()) {
-
                 val index = cursor.getColumnIndex(
                     android.provider.OpenableColumns.DISPLAY_NAME
                 )
@@ -254,21 +233,7 @@ class MainActivity : AppCompatActivity() {
         return name
     }
 
-    // Membaca durasi langsung dari URI video asli.
     private fun getVideoDuration(uri: Uri): String {
-
-        val duration = readDurationFromUri(uri)
-
-        if (duration <= 0L) {
-            return "Tidak diketahui"
-        }
-
-        val seconds = duration / 1000
-
-        return "${seconds / 60} menit ${seconds % 60} detik"
-    }
-
-    private fun readDurationFromUri(uri: Uri): Long {
 
         val retriever = MediaMetadataRetriever()
 
@@ -276,16 +241,22 @@ class MainActivity : AppCompatActivity() {
 
             retriever.setDataSource(this, uri)
 
-            retriever.extractMetadata(
+            val duration = retriever.extractMetadata(
                 MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
 
+            if (duration <= 0L) {
+                "Akan diperiksa saat proses"
+            } else {
+                val seconds = duration / 1000
+                "${seconds / 60} menit ${seconds % 60} detik"
+            }
+
         } catch (e: Exception) {
 
-            0L
+            "Akan diperiksa saat proses"
 
         } finally {
-
             try {
                 retriever.release()
             } catch (_: Exception) {
@@ -293,74 +264,51 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Cadangan pertama: membaca durasi dari file sementara.
-    private fun readDurationFromFile(file: File): Long {
+    private fun requestOutputFile() {
 
-        val retriever = MediaMetadataRetriever()
-
-        return try {
-
-            retriever.setDataSource(file.absolutePath)
-
-            retriever.extractMetadata(
-                MediaMetadataRetriever.METADATA_KEY_DURATION
-            )?.toLongOrNull() ?: 0L
-
-        } catch (e: Exception) {
-
-            0L
-
-        } finally {
-
-            try {
-                retriever.release()
-            } catch (_: Exception) {
-            }
+        if (selectedVideoUri == null) {
+            Toast.makeText(
+                this,
+                "Pilih video terlebih dahulu",
+                Toast.LENGTH_SHORT
+            ).show()
+            return
         }
+
+        outputPicker.launch("ClipMaster_AutoHighlight_30s.mp4")
     }
 
-    // Cadangan kedua: membaca durasi menggunakan MediaExtractor.
-    private fun readDurationFromExtractor(file: File): Long {
+    // FFprobe menjadi pembaca durasi utama.
+    private fun getDurationWithFFprobe(file: File): Long {
 
-        val extractor = MediaExtractor()
+        addLog("Memeriksa durasi menggunakan FFprobe")
 
-        return try {
+        val session = FFprobeKit.getMediaInformation(
+            file.absolutePath
+        )
 
-            extractor.setDataSource(file.absolutePath)
+        val information = session.mediaInformation
 
-            var longestDurationUs = 0L
+        if (information == null) {
 
-            for (index in 0 until extractor.trackCount) {
+            addLog("FFprobe tidak mendapatkan informasi media")
 
-                val format = extractor.getTrackFormat(index)
+            val logs = session.allLogsAsString
+            if (!logs.isNullOrBlank()) addLog(logs)
 
-                if (format.containsKey(
-                        android.media.MediaFormat.KEY_DURATION
-                    )
-                ) {
+            return 0L
+        }
 
-                    val durationUs = format.getLong(
-                        android.media.MediaFormat.KEY_DURATION
-                    )
+        val durationText = information.duration
 
-                    if (durationUs > longestDurationUs) {
-                        longestDurationUs = durationUs
-                    }
-                }
-            }
+        addLog("Data durasi FFprobe: $durationText")
 
-            longestDurationUs / 1000L
+        val seconds = durationText?.toDoubleOrNull() ?: 0.0
 
-        } catch (e: Exception) {
-
+        return if (seconds > 0.0) {
+            (seconds * 1000.0).toLong()
+        } else {
             0L
-
-        } finally {
-
-            try {
-                extractor.release()
-            } catch (_: Exception) {
-            }
         }
     }
 
@@ -369,52 +317,62 @@ class MainActivity : AppCompatActivity() {
         file: File
     ): Long {
 
-        addLog("Metode 1: membaca durasi dari video asli")
+        // Metode 1: FFprobe.
+        var duration = getDurationWithFFprobe(file)
 
-        var duration = readDurationFromUri(uri)
+        if (duration > 0L) {
+            addLog("Durasi berhasil dibaca oleh FFprobe")
+            return duration
+        }
+
+        // Metode 2: Metadata Android dari URI.
+        addLog("FFprobe gagal, mencoba metadata URI")
+
+        val retriever = MediaMetadataRetriever()
+
+        try {
+            retriever.setDataSource(this, uri)
+
+            duration = retriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull() ?: 0L
+
+        } catch (e: Exception) {
+            addLog("Metadata URI gagal: ${e.message}")
+        } finally {
+            try {
+                retriever.release()
+            } catch (_: Exception) {
+            }
+        }
 
         if (duration > 0L) {
             addLog("Durasi berhasil dibaca dari URI")
             return duration
         }
 
-        addLog("Metode 1 gagal, mencoba file sementara")
+        // Metode 3: Metadata Android dari file sementara.
+        addLog("Mencoba metadata file sementara")
 
-        duration = readDurationFromFile(file)
+        val fileRetriever = MediaMetadataRetriever()
 
-        if (duration > 0L) {
-            addLog("Durasi berhasil dibaca dari file sementara")
-            return duration
+        try {
+            fileRetriever.setDataSource(file.absolutePath)
+
+            duration = fileRetriever.extractMetadata(
+                MediaMetadataRetriever.METADATA_KEY_DURATION
+            )?.toLongOrNull() ?: 0L
+
+        } catch (e: Exception) {
+            addLog("Metadata file gagal: ${e.message}")
+        } finally {
+            try {
+                fileRetriever.release()
+            } catch (_: Exception) {
+            }
         }
 
-        addLog("Metode 2 gagal, mencoba MediaExtractor")
-
-        duration = readDurationFromExtractor(file)
-
-        if (duration > 0L) {
-            addLog("Durasi berhasil dibaca menggunakan MediaExtractor")
-            return duration
-        }
-
-        addLog("Semua metode pembacaan durasi gagal")
-
-        return 0L
-    }
-
-    private fun requestOutputFile() {
-
-        if (selectedVideoUri == null) {
-
-            Toast.makeText(
-                this,
-                "Pilih video terlebih dahulu",
-                Toast.LENGTH_SHORT
-            ).show()
-
-            return
-        }
-
-        outputPicker.launch("ClipMaster_AutoHighlight_30s.mp4")
+        return duration
     }
 
     private fun startProcessing(outputUri: Uri) {
@@ -435,18 +393,15 @@ class MainActivity : AppCompatActivity() {
 
         executor.execute {
 
-            var temporaryInput: File? = null
-            var temporaryOutput: File? = null
+            var inputFile: File? = null
+            var outputFile: File? = null
 
             try {
 
                 addLog("Menyalin video ke penyimpanan sementara")
 
-                val inputFile = File(cacheDir, "clipmaster_input.mp4")
-                val outputFile = File(cacheDir, "clipmaster_output.mp4")
-
-                temporaryInput = inputFile
-                temporaryOutput = outputFile
+                inputFile = File(cacheDir, "clipmaster_input.mp4")
+                outputFile = File(cacheDir, "clipmaster_output.mp4")
 
                 inputFile.delete()
                 outputFile.delete()
@@ -462,20 +417,17 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                if (!inputFile.exists() || inputFile.length() <= 0L) {
+                if (!inputFile.exists() || inputFile.length() == 0L) {
                     throw Exception("File video sementara kosong")
                 }
 
                 addLog("Input siap: ${inputFile.length()} bytes")
 
-                addLog("Membaca durasi video")
-
                 val durationMs = getReliableDuration(inputUri, inputFile)
 
                 if (durationMs <= 0L) {
                     throw Exception(
-                        "Durasi video tidak dapat dibaca. " +
-                        "Coba pilih file video MP4 lain."
+                        "FFprobe dan pembaca metadata gagal membaca durasi"
                     )
                 }
 
@@ -483,53 +435,41 @@ class MainActivity : AppCompatActivity() {
 
                 addLog(
                     "Durasi sumber: ${
-                        String.format(Locale.US, "%.1f", durationSeconds)
+                        String.format(Locale.US, "%.2f", durationSeconds)
                     } detik"
                 )
 
-                if (durationSeconds < 1.0) {
-                    throw Exception("Video terlalu pendek")
-                }
-
-                val actualClipDuration = min(
+                val actualDuration = min(
                     clipDurationSeconds.toDouble(),
                     durationSeconds
                 )
 
                 if (durationSeconds < clipDurationSeconds) {
-                    addLog(
-                        "Video kurang dari 30 detik. " +
-                        "Menggunakan seluruh durasi sumber."
-                    )
+                    addLog("Video kurang dari 30 detik")
+                    addLog("Menggunakan seluruh durasi sumber")
                 }
 
-                addLog("Menganalisis aktivitas visual video")
+                addLog("Memulai analisis visual")
 
                 val bestStart = if (
                     durationSeconds > clipDurationSeconds
                 ) {
-
                     try {
                         findBestVisualMoment(inputFile, durationMs)
                     } catch (e: Exception) {
-                        addLog(
-                            "Analisis visual tidak berhasil: ${e.message}"
-                        )
+                        addLog("Analisis visual gagal: ${e.message}")
                         addLog("Menggunakan bagian awal video")
                         0.0
                     }
-
                 } else {
                     0.0
                 }
 
                 addLog(
-                    "Bagian terpilih mulai detik: ${
+                    "Bagian terpilih: ${
                         String.format(Locale.US, "%.2f", bestStart)
-                    }"
+                    } detik"
                 )
-
-                addLog("Menyiapkan proses pemotongan")
 
                 val startValue = String.format(
                     Locale.US,
@@ -540,7 +480,7 @@ class MainActivity : AppCompatActivity() {
                 val durationValue = String.format(
                     Locale.US,
                     "%.3f",
-                    actualClipDuration
+                    actualDuration
                 )
 
                 val command =
@@ -559,18 +499,18 @@ class MainActivity : AppCompatActivity() {
                     "\"${outputFile.absolutePath}\""
 
                 addLog("Menjalankan FFmpeg")
-                addLog("Mengekspor satu video MP4")
+                addLog("Mengekspor MP4")
 
                 FFmpegKit.executeAsync(command) { session ->
 
                     try {
 
-                        val returnCode = session.returnCode
+                        val success = ReturnCode.isSuccess(
+                            session.returnCode
+                        )
 
                         addLog("FFmpeg selesai")
-                        addLog("Return code: $returnCode")
-
-                        val success = ReturnCode.isSuccess(returnCode)
+                        addLog("Return code: ${session.returnCode}")
 
                         if (
                             success &&
@@ -578,43 +518,31 @@ class MainActivity : AppCompatActivity() {
                             outputFile.length() > 0L
                         ) {
 
-                            try {
+                            addLog("Menyimpan hasil video")
 
-                                addLog("Menyimpan hasil video")
+                            contentResolver.openOutputStream(outputUri).use { output ->
 
-                                contentResolver.openOutputStream(outputUri).use { output ->
-
-                                    if (output == null) {
-                                        throw Exception(
-                                            "Gagal membuka lokasi penyimpanan"
-                                        )
-                                    }
-
-                                    outputFile.inputStream().use { input ->
-                                        input.copyTo(output)
-                                    }
+                                if (output == null) {
+                                    throw Exception(
+                                        "Tidak dapat membuka lokasi penyimpanan"
+                                    )
                                 }
 
-                                addLog("AUTO CLIP BERHASIL DISIMPAN")
-
-                                updateStatus(
-                                    "Status: AUTO CLIP BERHASIL",
-                                    true
-                                )
-
-                            } catch (e: Exception) {
-
-                                addLog("Gagal menyimpan: ${e.message}")
-
-                                updateStatus(
-                                    "Status: GAGAL MENYIMPAN",
-                                    false
-                                )
+                                outputFile.inputStream().use { input ->
+                                    input.copyTo(output)
+                                }
                             }
+
+                            addLog("AUTO CLIP BERHASIL DISIMPAN")
+
+                            updateStatus(
+                                "Status: AUTO CLIP BERHASIL",
+                                true
+                            )
 
                         } else {
 
-                            addLog("FFmpeg gagal memproses video")
+                            addLog("FFmpeg gagal")
 
                             val errorLogs = session.allLogsAsString
 
@@ -648,8 +576,8 @@ class MainActivity : AppCompatActivity() {
 
                 updateStatus("Status: ERROR", false)
 
-                temporaryInput?.delete()
-                temporaryOutput?.delete()
+                inputFile?.delete()
+                outputFile?.delete()
 
                 runOnUiThread {
                     pickButton.isEnabled = true
@@ -666,10 +594,7 @@ class MainActivity : AppCompatActivity() {
 
         val retriever = MediaMetadataRetriever()
 
-        val intervalMs = max(
-            2000L,
-            durationMs / 1799L
-        )
+        val intervalMs = max(2000L, durationMs / 1799L)
 
         val sampleCount = min(
             1800,
@@ -677,7 +602,6 @@ class MainActivity : AppCompatActivity() {
         )
 
         val scores = ArrayList<Double>()
-
         var previousPixels: IntArray? = null
 
         try {
@@ -686,10 +610,7 @@ class MainActivity : AppCompatActivity() {
 
             for (index in 0 until sampleCount) {
 
-                val timeMs = min(
-                    index * intervalMs,
-                    durationMs
-                )
+                val timeMs = min(index * intervalMs, durationMs)
 
                 val bitmap = retriever.getFrameAtTime(
                     timeMs * 1000L,
@@ -697,16 +618,11 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 if (bitmap == null) {
-
-                    if (previousPixels != null) {
-                        scores.add(0.0)
-                    }
-
+                    if (previousPixels != null) scores.add(0.0)
                     continue
                 }
 
                 val currentPixels = samplePixels(bitmap)
-
                 bitmap.recycle()
 
                 val previous = previousPixels
@@ -735,33 +651,26 @@ class MainActivity : AppCompatActivity() {
                         ) / 3.0
                     }
 
-                    val averageDifference =
+                    scores.add(
                         difference / currentPixels.size / 255.0
-
-                    scores.add(averageDifference)
+                    )
                 }
 
                 previousPixels = currentPixels
 
                 if (index % 30 == 0) {
-                    addLog(
-                        "Analisis visual: sampel ${index + 1}/$sampleCount"
-                    )
+                    addLog("Analisis visual: ${index + 1}/$sampleCount")
                 }
             }
 
         } finally {
-
             try {
                 retriever.release()
             } catch (_: Exception) {
             }
         }
 
-        if (scores.isEmpty()) {
-            addLog("Data visual tidak cukup")
-            return 0.0
-        }
+        if (scores.isEmpty()) return 0.0
 
         val windowIntervals = ceil(
             clipDurationSeconds * 1000.0 / intervalMs
@@ -772,23 +681,17 @@ class MainActivity : AppCompatActivity() {
             ((durationMs - clipDurationSeconds * 1000L) / intervalMs).toInt()
         )
 
-        if (lastPossibleStart <= 0) {
-            return 0.0
-        }
+        if (lastPossibleStart <= 0) return 0.0
 
         val step = max(1, windowIntervals / 4)
 
         var bestIndex = 0
         var bestScore = Double.NEGATIVE_INFINITY
-
         var index = 0
 
         while (index <= lastPossibleStart) {
 
-            val endIndex = min(
-                scores.size,
-                index + windowIntervals
-            )
+            val endIndex = min(scores.size, index + windowIntervals)
 
             var total = 0.0
 
@@ -806,27 +709,24 @@ class MainActivity : AppCompatActivity() {
             index += step
         }
 
-        if (bestIndex != lastPossibleStart) {
+        var lastTotal = 0.0
 
-            var total = 0.0
+        for (
+            i in lastPossibleStart until
+            min(scores.size, lastPossibleStart + windowIntervals)
+        ) {
+            lastTotal += scores[i]
+        }
 
-            for (
-                i in lastPossibleStart until
-                min(scores.size, lastPossibleStart + windowIntervals)
-            ) {
-                total += scores[i]
-            }
+        val lastCount = min(
+            windowIntervals,
+            scores.size - lastPossibleStart
+        )
 
-            val count = min(
-                windowIntervals,
-                scores.size - lastPossibleStart
-            )
+        val lastAverage = lastTotal / max(1, lastCount)
 
-            val lastAverage = total / max(1, count)
-
-            if (lastAverage > bestScore) {
-                bestIndex = lastPossibleStart
-            }
+        if (lastAverage > bestScore) {
+            bestIndex = lastPossibleStart
         }
 
         return bestIndex * intervalMs / 1000.0
@@ -836,11 +736,9 @@ class MainActivity : AppCompatActivity() {
 
         val columns = 32
         val rows = 18
-
         val pixels = IntArray(columns * rows)
 
         for (y in 0 until rows) {
-
             for (x in 0 until columns) {
 
                 val sourceX = min(
