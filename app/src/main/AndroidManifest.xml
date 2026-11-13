@@ -3,16 +3,12 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
 
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-
-    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
-
     <application
         android:allowBackup="true"
         android:label="ClipMaster AI"
         android:supportsRtl="true"
-        android:theme="@style/Theme.ClipMaster">
+        android:theme="@style/Theme.ClipMaster"
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".MainActivity"
