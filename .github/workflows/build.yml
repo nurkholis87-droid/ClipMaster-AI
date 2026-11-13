@@ -1,17 +1,21 @@
-name: Build ClipMaster AI APK
+name: Build ClipMaster AI
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+  pull_request:
+    branches:
+      - main
 
 jobs:
   build:
+    name: Build Android APK
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Setup Java 17
@@ -20,16 +24,31 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android NDK and CMake
+        run: |
+          sdkmanager --install "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Download Whisper source
+        run: |
+          mkdir -p third_party
+          git clone --depth 1 --branch v1.9.5 \
+            https://github.com/ggml-org/whisper.cpp.git \
+            third_party/whisper.cpp
+
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
+        uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.9
 
-      - name: Build Debug APK
-        run: gradle assembleDebug
+      - name: Build APK
+        run: gradle assembleDebug --no-daemon
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: ClipMaster-AI-APK
+          name: ClipMaster-AI-3.0-APK
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
