@@ -18,6 +18,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -73,9 +74,10 @@ class MainActivity : AppCompatActivity() {
         buildInterface()
 
         addLog("ClipMaster AI siap")
-        addLog("Versi 2.2.0")
+        addLog("Versi 2.3.0")
         addLog("AUTO HIGHLIGHT 30 DETIK")
-        addLog("Mesin pembaca durasi: FFprobe")
+        addLog("Mesin durasi: FFprobe")
+        addLog("Mesin analisis: Visual Window Scoring")
     }
 
     private fun buildInterface() {
@@ -130,8 +132,8 @@ class MainActivity : AppCompatActivity() {
 
         root.addView(TextView(this).apply {
             text = "AUTO HIGHLIGHT 30 DETIK\n\n" +
-                    "Aplikasi menganalisis perubahan visual video " +
-                    "dan memilih bagian dengan aktivitas visual tinggi."
+                    "Menganalisis perubahan visual pada video " +
+                    "untuk mencari bagian dengan aktivitas tertinggi."
             textSize = 14f
             setTextColor(android.graphics.Color.rgb(190, 205, 225))
             setPadding(14, 14, 14, 14)
@@ -278,15 +280,11 @@ class MainActivity : AppCompatActivity() {
         outputPicker.launch("ClipMaster_AutoHighlight_30s.mp4")
     }
 
-    // FFprobe menjadi pembaca durasi utama.
     private fun getDurationWithFFprobe(file: File): Long {
 
         addLog("Memeriksa durasi menggunakan FFprobe")
 
-        val session = FFprobeKit.getMediaInformation(
-            file.absolutePath
-        )
-
+        val session = FFprobeKit.getMediaInformation(file.absolutePath)
         val information = session.mediaInformation
 
         if (information == null) {
@@ -317,7 +315,6 @@ class MainActivity : AppCompatActivity() {
         file: File
     ): Long {
 
-        // Metode 1: FFprobe.
         var duration = getDurationWithFFprobe(file)
 
         if (duration > 0L) {
@@ -325,7 +322,6 @@ class MainActivity : AppCompatActivity() {
             return duration
         }
 
-        // Metode 2: Metadata Android dari URI.
         addLog("FFprobe gagal, mencoba metadata URI")
 
         val retriever = MediaMetadataRetriever()
@@ -351,7 +347,6 @@ class MainActivity : AppCompatActivity() {
             return duration
         }
 
-        // Metode 3: Metadata Android dari file sementara.
         addLog("Mencoba metadata file sementara")
 
         val fileRetriever = MediaMetadataRetriever()
@@ -426,9 +421,7 @@ class MainActivity : AppCompatActivity() {
                 val durationMs = getReliableDuration(inputUri, inputFile)
 
                 if (durationMs <= 0L) {
-                    throw Exception(
-                        "FFprobe dan pembaca metadata gagal membaca durasi"
-                    )
+                    throw Exception("Durasi video tidak dapat dibaca")
                 }
 
                 val durationSeconds = durationMs / 1000.0
@@ -458,8 +451,11 @@ class MainActivity : AppCompatActivity() {
                         findBestVisualMoment(inputFile, durationMs)
                     } catch (e: Exception) {
                         addLog("Analisis visual gagal: ${e.message}")
-                        addLog("Menggunakan bagian awal video")
-                        0.0
+                        addLog("Menggunakan bagian tengah video")
+                        max(
+                            0.0,
+                            (durationSeconds - actualDuration) / 2.0
+                        )
                     }
                 } else {
                     0.0
@@ -603,6 +599,7 @@ class MainActivity : AppCompatActivity() {
 
         val scores = ArrayList<Double>()
         var previousPixels: IntArray? = null
+        var successfulFrames = 0
 
         try {
 
@@ -618,9 +615,11 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 if (bitmap == null) {
-                    if (previousPixels != null) scores.add(0.0)
+                    previousPixels = null
                     continue
                 }
+
+                successfulFrames++
 
                 val currentPixels = samplePixels(bitmap)
                 bitmap.recycle()
@@ -645,15 +644,16 @@ class MainActivity : AppCompatActivity() {
                         val newB = newPixel and 0xFF
 
                         difference += (
-                            kotlin.math.abs(newR - oldR) +
-                            kotlin.math.abs(newG - oldG) +
-                            kotlin.math.abs(newB - oldB)
+                            abs(newR - oldR) +
+                            abs(newG - oldG) +
+                            abs(newB - oldB)
                         ) / 3.0
                     }
 
-                    scores.add(
+                    val score =
                         difference / currentPixels.size / 255.0
-                    )
+
+                    scores.add(score)
                 }
 
                 previousPixels = currentPixels
@@ -670,66 +670,94 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        if (scores.isEmpty()) return 0.0
+        addLog("Frame berhasil dianalisis: $successfulFrames")
+        addLog("Jumlah skor perubahan visual: ${scores.size}")
 
-        val windowIntervals = ceil(
-            clipDurationSeconds * 1000.0 / intervalMs
-        ).toInt()
+        if (scores.isEmpty()) {
+            addLog("Tidak ada skor visual yang bisa dihitung")
+            return max(
+                0.0,
+                (durationMs / 1000.0 - clipDurationSeconds) / 2.0
+            )
+        }
+
+        val windowIntervals = max(
+            1,
+            ceil(
+                clipDurationSeconds * 1000.0 / intervalMs
+            ).toInt()
+        )
 
         val lastPossibleStart = min(
             scores.size - windowIntervals,
-            ((durationMs - clipDurationSeconds * 1000L) / intervalMs).toInt()
+            (
+                (durationMs - clipDurationSeconds * 1000L) /
+                    intervalMs
+                ).toInt()
         )
 
-        if (lastPossibleStart <= 0) return 0.0
+        if (lastPossibleStart <= 0) {
+            addLog("Durasi tidak cukup untuk membandingkan jendela")
+            return 0.0
+        }
 
-        val step = max(1, windowIntervals / 4)
+        // Prefix sum agar seluruh kandidat bisa dibandingkan cepat.
+        val prefix = DoubleArray(scores.size + 1)
+
+        for (i in scores.indices) {
+            prefix[i + 1] = prefix[i] + scores[i]
+        }
 
         var bestIndex = 0
         var bestScore = Double.NEGATIVE_INFINITY
-        var index = 0
 
-        while (index <= lastPossibleStart) {
+        // Memeriksa setiap kemungkinan posisi awal.
+        for (index in 0..lastPossibleStart) {
 
-            val endIndex = min(scores.size, index + windowIntervals)
+            val endIndex = min(
+                scores.size,
+                index + windowIntervals
+            )
 
-            var total = 0.0
+            val count = endIndex - index
 
-            for (i in index until endIndex) {
-                total += scores[i]
-            }
+            if (count <= 0) continue
 
-            val average = total / max(1, endIndex - index)
+            val total = prefix[endIndex] - prefix[index]
+            val average = total / count
 
             if (average > bestScore) {
                 bestScore = average
                 bestIndex = index
             }
-
-            index += step
         }
 
-        var lastTotal = 0.0
-
-        for (
-            i in lastPossibleStart until
-            min(scores.size, lastPossibleStart + windowIntervals)
-        ) {
-            lastTotal += scores[i]
-        }
-
-        val lastCount = min(
-            windowIntervals,
-            scores.size - lastPossibleStart
+        addLog(
+            "Skor aktivitas terbaik: ${
+                String.format(Locale.US, "%.5f", bestScore)
+            }"
         )
 
-        val lastAverage = lastTotal / max(1, lastCount)
+        // Skor terlalu rendah berarti perubahan visual sangat kecil.
+        // Gunakan bagian tengah agar tidak mengklaim ada highlight.
+        val minimumActivityScore = 0.015
 
-        if (lastAverage > bestScore) {
-            bestIndex = lastPossibleStart
+        if (bestScore < minimumActivityScore) {
+
+            addLog("Aktivitas visual terlalu rendah")
+            addLog("Menggunakan bagian tengah sebagai cadangan")
+
+            return max(
+                0.0,
+                (durationMs / 1000.0 - clipDurationSeconds) / 2.0
+            )
         }
 
-        return bestIndex * intervalMs / 1000.0
+        val selectedStart = bestIndex * intervalMs / 1000.0
+
+        addLog("Highlight ditemukan berdasarkan aktivitas visual")
+
+        return selectedStart
     }
 
     private fun samplePixels(bitmap: Bitmap): IntArray {
