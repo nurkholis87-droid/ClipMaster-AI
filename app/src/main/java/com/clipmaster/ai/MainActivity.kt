@@ -448,11 +448,12 @@ class MainActivity : AppCompatActivity() {
                 }
             ) {
                 chosen.add(candidate)
-                if (chosen.size == 10) break
+                // Three passes keep long on-device inference bounded.
+                if (chosen.size == 3) break
             }
         }
 
-        addLog("Kandidat audio yang akan diperiksa: ${chosen.size}")
+        addLog("Kandidat audio yang akan diperiksa: ${chosen.size} (maksimal 3 untuk menjaga memori HP)")
         addLog("Durasi setiap kandidat: $clipSeconds detik")
 
         return chosen
@@ -665,6 +666,10 @@ class MainActivity : AppCompatActivity() {
         }
         val context = try {
             WhisperNative.initModel(ensureWhisperModel().absolutePath)
+        } catch (e: OutOfMemoryError) {
+            addLog("Memori tidak cukup untuk memuat model caption; lanjut ekspor tanpa caption")
+            pcm.delete()
+            return null
         } catch (e: Exception) {
             addLog("Model caption gagal disiapkan: ${e.message}")
             pcm.delete()
@@ -716,6 +721,9 @@ class MainActivity : AppCompatActivity() {
             ass.writeText(header + events.toString())
             addLog("Caption karaoke tersinkron dibuat")
             return ass
+        } catch (e: OutOfMemoryError) {
+            addLog("Memori tidak cukup saat membuat caption; video akan diekspor tanpa caption")
+            return null
         } catch (e: Exception) {
             addLog("Caption gagal: ${e.message}")
             return null
@@ -883,6 +891,10 @@ class MainActivity : AppCompatActivity() {
 
                 addLog("AUTO CLIP BERHASIL DISIMPAN")
                 updateStatus("Status: AUTO CLIP BERHASIL", true)
+
+            } catch (e: OutOfMemoryError) {
+                addLog("MEMORI HP TIDAK CUKUP: proses dihentikan dengan aman. Coba video lebih pendek atau nonaktifkan caption.")
+                updateStatus("Status: MEMORI TIDAK CUKUP", false)
 
             } catch (e: Exception) {
                 addLog("ERROR: ${e.message}")
