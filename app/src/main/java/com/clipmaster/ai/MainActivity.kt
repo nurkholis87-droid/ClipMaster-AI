@@ -588,10 +588,15 @@ class MainActivity : AppCompatActivity() {
             diversityScore
     }
 
+    private data class TranscriptionResult(
+        val startSeconds: Double,
+        val timedTranscript: String
+    )
+
     private fun transcribeCandidates(
         pcm: File,
         candidates: List<Candidate>
-    ): Double {
+    ): TranscriptionResult {
         if (candidates.isEmpty()) {
             throw Exception("Tidak ada kandidat audio")
         }
@@ -600,62 +605,48 @@ class MainActivity : AppCompatActivity() {
         addLog("Memuat model Whisper ke memori")
 
         val context = WhisperNative.initModel(model.absolutePath)
-
-        if (context == 0L) {
-            throw Exception("Whisper gagal memuat model")
-        }
+        if (context == 0L) throw Exception("Whisper gagal memuat model")
 
         var bestStart = candidates.first().startSeconds
         var bestScore = Double.NEGATIVE_INFINITY
+        var bestTimedTranscript = ""
 
         try {
             RandomAccessFile(pcm, "r").use { file ->
-
                 for ((index, candidate) in candidates.withIndex()) {
-                    addLog(
-                        "Transkripsi kandidat ${index + 1}/${candidates.size}"
-                    )
+                    addLog("Transkripsi kandidat ${index + 1}/${candidates.size}")
 
-                    val offset =
-                        (candidate.startSeconds * sampleRate * 2).toLong()
-
+                    val offset = (candidate.startSeconds * sampleRate * 2).toLong()
                     val byteCount = clipSeconds * sampleRate * 2
-
                     if (offset + byteCount > file.length()) continue
 
                     file.seek(offset)
-
                     val bytes = ByteArray(byteCount)
                     file.readFully(bytes)
-
-                    val buffer = ByteBuffer.wrap(bytes)
-                        .order(ByteOrder.LITTLE_ENDIAN)
-
-                    val audio = FloatArray(clipSeconds * sampleRate)
-
-                    for (i in audio.indices) {
-                        audio[i] = buffer.short.toFloat() / 32768.0f
+                    val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                    val audio = FloatArray(clipSeconds * sampleRate) {
+                        buffer.short.toFloat() / 32768.0f
                     }
 
-                    val transcript =
-                        WhisperNative.transcribe(context, audio)
+                    // One timestamped inference provides both candidate scoring and
+                    // the exact transcript later burned into the selected clip.
+                    val timed = WhisperNative.transcribeTimed(context, audio)
+                    val transcript = timed.lineSequence()
+                        .mapNotNull { line ->
+                            val parts = line.split('\t', limit = 3)
+                            if (parts.size == 3) parts[2] else null
+                        }
+                        .joinToString(" ")
 
-                    val score =
-                        transcriptScore(transcript) +
-                            candidate.audioScore * 8.0
+                    val score = transcriptScore(transcript) + candidate.audioScore * 8.0
+                    addLog("Teks ${index + 1}: ${transcript.replace("\n", " ").take(180)}")
+                    addLog("Skor isi ${index + 1}: " +
+                        String.format(Locale.US, "%.2f", score))
 
-                    val preview =
-                        transcript.replace("\n", " ").take(180)
-
-                    addLog("Teks ${index + 1}: $preview")
-                    addLog(
-                        "Skor isi ${index + 1}: " +
-                            String.format(Locale.US, "%.2f", score)
-                    )
-
-                    if (score > bestScore) {
+                    if (timed.isNotBlank() && score > bestScore) {
                         bestScore = score
                         bestStart = candidate.startSeconds
+                        bestTimedTranscript = timed
                     }
                 }
             }
@@ -663,43 +654,58 @@ class MainActivity : AppCompatActivity() {
             WhisperNative.freeModel(context)
         }
 
-        addLog(
-            "Skor transkrip terbaik: " +
-                String.format(Locale.US, "%.2f", bestScore)
-        )
+        if (bestTimedTranscript.isBlank()) {
+            throw Exception("Whisper tidak menghasilkan transkrip bertimestamp")
+        }
 
-        return bestStart
+        addLog("Skor transkrip terbaik: " +
+            String.format(Locale.US, "%.2f", bestScore))
+        addLog("Transkrip kandidat terbaik akan dipakai ulang untuk caption (tanpa inferensi kedua)")
+
+        return TranscriptionResult(bestStart, bestTimedTranscript)
     }
 
-
-    private fun createCaptionAss(input: File, start: Double, duration: Double): File? {
-        val pcm = File(cacheDir, "clipmaster_caption_audio.pcm")
-        val ss = String.format(Locale.US, "%.3f", start)
-        val tt = String.format(Locale.US, "%.3f", duration)
-        val cmd = "-y -ss $ss -i \"${input.absolutePath}\" -t $tt -map 0:a:0 -vn -ac 1 -ar 16000 -c:a pcm_s16le -f s16le \"${pcm.absolutePath}\""
-        val audioSession = FFmpegKit.execute(cmd)
-        if (!ReturnCode.isSuccess(audioSession.returnCode) || !pcm.exists() || pcm.length() < 2L) {
-            addLog("Audio caption tidak tersedia; ekspor tanpa caption")
-            pcm.delete()
-            return null
-        }
-        val context = try {
-            WhisperNative.initModel(ensureWhisperModel().absolutePath)
-        } catch (e: OutOfMemoryError) {
-            addLog("Memori tidak cukup untuk memuat model caption; lanjut ekspor tanpa caption")
-            pcm.delete()
-            return null
-        } catch (e: Exception) {
-            addLog("Model caption gagal disiapkan: ${e.message}")
-            pcm.delete()
-            return null
-        }
-        if (context == 0L) { pcm.delete(); return null }
+    private fun createCaptionAss(
+        input: File,
+        start: Double,
+        duration: Double,
+        cachedTimedTranscript: String?
+    ): File? {
+        var pcm: File? = null
+        var context = 0L
         try {
-            val bytes = pcm.readBytes()
-            val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
-            val audio = FloatArray(bytes.size / 2) { buffer.short.toFloat() / 32768.0f }
-            val timed = WhisperNative.transcribeTimed(context, audio)
+            val timed = if (!cachedTimedTranscript.isNullOrBlank()) {
+                addLog("Memakai ulang hasil transkripsi kandidat untuk caption")
+                cachedTimedTranscript
+            } else {
+                // Short source videos do not need candidate ranking, so transcribe
+                // their selected audio once here to obtain caption timestamps.
+                pcm = File(cacheDir, "clipmaster_caption_audio.pcm")
+                val ss = String.format(Locale.US, "%.3f", start)
+                val tt = String.format(Locale.US, "%.3f", duration)
+                val cmd = "-y -ss $ss -i \"${input.absolutePath}\" -t $tt -map 0:a:0 -vn -ac 1 -ar 16000 -c:a pcm_s16le -f s16le \"${pcm.absolutePath}\""
+                val audioSession = FFmpegKit.execute(cmd)
+                if (!ReturnCode.isSuccess(audioSession.returnCode) || !pcm.exists() || pcm.length() < 2L) {
+                    addLog("Audio caption tidak tersedia; ekspor tanpa caption")
+                    return null
+                }
+
+                context = try {
+                    WhisperNative.initModel(ensureWhisperModel().absolutePath)
+                } catch (e: OutOfMemoryError) {
+                    addLog("Memori tidak cukup untuk memuat model caption; lanjut ekspor tanpa caption")
+                    return null
+                }
+                if (context == 0L) {
+                    addLog("Model caption gagal dimuat; ekspor tanpa caption")
+                    return null
+                }
+                val bytes = pcm.readBytes()
+                val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+                val audio = FloatArray(bytes.size / 2) { buffer.short.toFloat() / 32768.0f }
+                WhisperNative.transcribeTimed(context, audio)
+            }
+
             if (timed.isBlank()) return null
             fun stamp(value: Double): String {
                 val cs = (value.coerceAtLeast(0.0) * 100.0).toLong()
@@ -747,8 +753,8 @@ class MainActivity : AppCompatActivity() {
             addLog("Caption gagal: ${e.message}")
             return null
         } finally {
-            WhisperNative.freeModel(context)
-            pcm.delete()
+            if (context != 0L) WhisperNative.freeModel(context)
+            pcm?.delete()
         }
     }
 
@@ -756,13 +762,14 @@ class MainActivity : AppCompatActivity() {
         input: File,
         output: File,
         start: Double,
-        duration: Double
+        duration: Double,
+        cachedTimedTranscript: String?
     ): Boolean {
         val ss = String.format(Locale.US, "%.3f", start)
         val tt = String.format(Locale.US, "%.3f", duration)
 
         val captionFilter = if (captionsEnabled) {
-            val ass = createCaptionAss(input, start, duration)
+            val ass = createCaptionAss(input, start, duration, cachedTimedTranscript)
             if (ass != null) {
                 val escaped = ass.absolutePath.replace("\\", "\\\\").replace(":", "\\:")
                 "-vf \"subtitles='$escaped'\" "
@@ -865,6 +872,7 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 var chosenStart = 0.0
+                var selectedTimedTranscript: String? = null
 
                 if (duration > selectedDuration) {
                     if (!extractPcm16k(input, pcm)) {
@@ -878,7 +886,9 @@ class MainActivity : AppCompatActivity() {
                     }
 
                     chosenStart = try {
-                        transcribeCandidates(pcm, candidates)
+                        val selection = transcribeCandidates(pcm, candidates)
+                        selectedTimedTranscript = selection.timedTranscript
+                        selection.startSeconds
                     } catch (e: Exception) {
                         addLog("Whisper tidak tersedia: ${e.message}")
                         addLog(
@@ -900,7 +910,7 @@ class MainActivity : AppCompatActivity() {
 
                 addLog("Durasi hasil: $clipDuration detik")
 
-                if (!exportClip(input, output, chosenStart, clipDuration)) {
+                if (!exportClip(input, output, chosenStart, clipDuration, selectedTimedTranscript)) {
                     throw Exception("Ekspor FFmpeg gagal")
                 }
 
