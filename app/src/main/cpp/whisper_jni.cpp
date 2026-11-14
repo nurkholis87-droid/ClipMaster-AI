@@ -129,6 +129,47 @@ Java_com_clipmaster_ai_WhisperNative_transcribe(
 }
 
 
+
+JNIEXPORT jstring JNICALL
+Java_com_clipmaster_ai_WhisperNative_transcribeTimed(
+        JNIEnv *env, jobject thiz, jlong contextPointer, jfloatArray audioArray) {
+    if (contextPointer == 0 || audioArray == nullptr) return env->NewStringUTF("");
+    auto *context = reinterpret_cast<whisper_context *>(contextPointer);
+    jsize length = env->GetArrayLength(audioArray);
+    if (length <= 0) return env->NewStringUTF("");
+    jfloat *audio = env->GetFloatArrayElements(audioArray, nullptr);
+    if (audio == nullptr) return env->NewStringUTF("");
+    whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    unsigned int hw = std::thread::hardware_concurrency();
+    params.n_threads = std::max(1, std::min(4, static_cast<int>(hw == 0 ? 2 : hw)));
+    params.language = "id";
+    params.translate = false;
+    params.no_context = true;
+    params.no_timestamps = false;
+    params.print_progress = false;
+    params.print_realtime = false;
+    params.print_timestamps = false;
+    params.suppress_blank = true;
+    params.suppress_nst = true;
+    params.temperature = 0.0f;
+    int result = whisper_full(context, params, audio, static_cast<int>(length));
+    env->ReleaseFloatArrayElements(audioArray, audio, JNI_ABORT);
+    if (result != 0) return env->NewStringUTF("");
+    std::string output;
+    const int count = whisper_full_n_segments(context);
+    for (int i = 0; i < count; ++i) {
+        const char *segment = whisper_full_get_segment_text(context, i);
+        if (segment == nullptr) continue;
+        const double start = whisper_full_get_segment_t0(context, i) * 0.01;
+        const double end = whisper_full_get_segment_t1(context, i) * 0.01;
+        std::string text(segment);
+        std::replace(text.begin(), text.end(), '\t', ' ');
+        std::replace(text.begin(), text.end(), '\n', ' ');
+        output += std::to_string(start) + "\t" + std::to_string(end) + "\t" + text + "\n";
+    }
+    return env->NewStringUTF(output.c_str());
+}
+
 JNIEXPORT void JNICALL
 Java_com_clipmaster_ai_WhisperNative_freeModel(
         JNIEnv *env,
