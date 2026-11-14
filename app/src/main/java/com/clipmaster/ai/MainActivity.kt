@@ -697,8 +697,7 @@ class MainActivity : AppCompatActivity() {
                     if (i > 0 && i % 7 == 0) text.append("\\N") else if (i > 0) text.append(" ")
                     val a = i * total / words.size
                     val b = (i + 1) * total / words.size
-                    text.append("{\\kf").append((b - a).coerceAtLeast(1))
-                        .append("\\c&H0000FFFF&}").append(word).append("{\\c&H00FFFFFF&}")
+                    text.append("{\\kf").append((b - a).coerceAtLeast(1)).append("}").append(word)
                 }
                 events.append("Dialogue: 0,").append(stamp(from)).append(',')
                     .append(stamp(until)).append(",Default,,0,0,0,,")
@@ -710,7 +709,7 @@ class MainActivity : AppCompatActivity() {
                 "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
                 "[V4+ Styles]",
                 "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
-                "Style: Default,Arial,58,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,1,2,70,70,100,1", "",
+                "Style: Default,Arial,58,&H0000FFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,1,2,70,70,100,1", "",
                 "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
             ).joinToString("\n") + "\n"
             val ass = File(cacheDir, "clipmaster_captions.ass")
