@@ -75,10 +75,8 @@ Java_com_clipmaster_ai_WhisperNative_transcribe(
     params.n_threads = std::max(
             1,
             std::min(
-                    4,
-                    static_cast<int>(
-                            hardwareThreads == 0 ? 2 : hardwareThreads
-                    )
+                    2,
+                    static_cast<int>(hardwareThreads == 0 ? 1 : hardwareThreads)
             )
     );
 
@@ -141,7 +139,7 @@ Java_com_clipmaster_ai_WhisperNative_transcribeTimed(
     if (audio == nullptr) return env->NewStringUTF("");
     whisper_full_params params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     unsigned int hw = std::thread::hardware_concurrency();
-    params.n_threads = std::max(1, std::min(4, static_cast<int>(hw == 0 ? 2 : hw)));
+    params.n_threads = std::max(1, std::min(2, static_cast<int>(hw == 0 ? 1 : hw)));
     params.language = "id";
     params.translate = false;
     params.no_context = true;
