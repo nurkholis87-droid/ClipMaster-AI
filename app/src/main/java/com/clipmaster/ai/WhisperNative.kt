@@ -13,5 +13,7 @@ object WhisperNative {
         audio: FloatArray
     ): String
 
+    external fun transcribeTimed(context: Long, audio: FloatArray): String
+
     external fun freeModel(context: Long)
 }
