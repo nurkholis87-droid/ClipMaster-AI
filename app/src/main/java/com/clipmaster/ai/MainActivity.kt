@@ -30,6 +30,7 @@ class MainActivity : AppCompatActivity() {
 
     private val executor = Executors.newSingleThreadExecutor()
     private var clipSeconds = 60
+    private var captionsEnabled = true
     private val sampleRate = 16000
 
     private val durations = listOf(30, 45, 60, 90)
@@ -152,6 +153,15 @@ class MainActivity : AppCompatActivity() {
             }
 
         root.addView(durationSpinner, buttonParams())
+
+        root.addView(Switch(this).apply {
+            text = "CAPTION OTOMATIS • KARAOKE DINAMIS"
+            textSize = 14f
+            setTextColor(android.graphics.Color.WHITE)
+            isChecked = true
+            setPadding(8, 18, 8, 18)
+            setOnCheckedChangeListener { _, checked -> captionsEnabled = checked }
+        }, buttonParams())
 
         root.addView(TextView(this).apply {
             text = "AUTO PODCAST HIGHLIGHT"
@@ -641,6 +651,81 @@ class MainActivity : AppCompatActivity() {
         return bestStart
     }
 
+
+    private fun createCaptionAss(input: File, start: Double, duration: Double): File? {
+        val pcm = File(cacheDir, "clipmaster_caption_audio.pcm")
+        val ss = String.format(Locale.US, "%.3f", start)
+        val tt = String.format(Locale.US, "%.3f", duration)
+        val cmd = "-y -ss $ss -i \"\${input.absolutePath}\" -t $tt -map 0:a:0 -vn -ac 1 -ar 16000 -c:a pcm_s16le -f s16le \"\${pcm.absolutePath}\""
+        val audioSession = FFmpegKit.execute(cmd)
+        if (!ReturnCode.isSuccess(audioSession.returnCode) || !pcm.exists() || pcm.length() < 2L) {
+            addLog("Audio caption tidak tersedia; ekspor tanpa caption")
+            pcm.delete()
+            return null
+        }
+        val context = try {
+            WhisperNative.initModel(ensureWhisperModel().absolutePath)
+        } catch (e: Exception) {
+            addLog("Model caption gagal disiapkan: \${e.message}")
+            pcm.delete()
+            return null
+        }
+        if (context == 0L) { pcm.delete(); return null }
+        try {
+            val bytes = pcm.readBytes()
+            val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+            val audio = FloatArray(bytes.size / 2) { buffer.short.toFloat() / 32768.0f }
+            val timed = WhisperNative.transcribeTimed(context, audio)
+            if (timed.isBlank()) return null
+            fun stamp(value: Double): String {
+                val cs = (value.coerceAtLeast(0.0) * 100.0).toLong()
+                return String.format(Locale.US, "%d:%02d:%02d.%02d",
+                    cs / 360000, (cs % 360000) / 6000, (cs % 6000) / 100, cs % 100)
+            }
+            val events = StringBuilder()
+            for (line in timed.lines()) {
+                val p = line.split('\t', limit = 3)
+                if (p.size != 3) continue
+                val from = p[0].toDoubleOrNull() ?: continue
+                val until = p[1].toDoubleOrNull() ?: continue
+                val words = p[2].trim().split(Regex("\\s+")).filter { it.isNotBlank() }
+                if (words.isEmpty() || until <= from) continue
+                val total = ((until - from) * 100).toInt().coerceAtLeast(1)
+                val text = StringBuilder()
+                words.forEachIndexed { i, raw ->
+                    val word = raw.replace("{", "(").replace("}", ")").replace("\\", "")
+                    if (i > 0 && i % 7 == 0) text.append("\\N") else if (i > 0) text.append(" ")
+                    val a = i * total / words.size
+                    val b = (i + 1) * total / words.size
+                    text.append("{\\kf").append((b - a).coerceAtLeast(1))
+                        .append("\\c&H0000FFFF&}").append(word).append("{\\c&H00FFFFFF&}")
+                }
+                events.append("Dialogue: 0,").append(stamp(from)).append(',')
+                    .append(stamp(until)).append(",Default,,0,0,0,,")
+                    .append(text).append('\n')
+            }
+            if (events.isEmpty()) return null
+            val header = listOf(
+                "[Script Info]", "ScriptType: v4.00+", "PlayResX: 1080", "PlayResY: 1920",
+                "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
+                "[V4+ Styles]",
+                "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+                "Style: Default,Arial,58,&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,4,1,2,70,70,100,1", "",
+                "[Events]", "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
+            ).joinToString("\n") + "\n"
+            val ass = File(cacheDir, "clipmaster_captions.ass")
+            ass.writeText(header + events.toString())
+            addLog("Caption karaoke tersinkron dibuat")
+            return ass
+        } catch (e: Exception) {
+            addLog("Caption gagal: \${e.message}")
+            return null
+        } finally {
+            WhisperNative.freeModel(context)
+            pcm.delete()
+        }
+    }
+
     private fun exportClip(
         input: File,
         output: File,
@@ -650,8 +735,17 @@ class MainActivity : AppCompatActivity() {
         val ss = String.format(Locale.US, "%.3f", start)
         val tt = String.format(Locale.US, "%.3f", duration)
 
+        val captionFilter = if (captionsEnabled) {
+            val ass = createCaptionAss(input, start, duration)
+            if (ass != null) {
+                val escaped = ass.absolutePath.replace("\\", "\\\\").replace(":", "\\:")
+                "-vf \"subtitles='$escaped'\" "
+            } else ""
+        } else ""
+
         val command =
-            "-y -ss $ss -i \"${input.absolutePath}\" -t $tt " +
+            "-y -ss $ss -i \"\${input.absolutePath}\" -t $tt " +
+                captionFilter +
                 "-map 0:v:0 -map 0:a? " +
                 "-c:v libopenh264 -b:v 4000k -pix_fmt yuv420p " +
                 "-c:a aac -b:a 128k -movflags +faststart " +
