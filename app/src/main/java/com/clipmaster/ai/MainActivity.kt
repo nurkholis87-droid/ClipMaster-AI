@@ -60,6 +60,15 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
+    private val notificationPermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) {
+                addLog("Izin notifikasi diberikan; status proses dapat ditampilkan")
+            } else {
+                addLog("Izin notifikasi ditolak; aktifkan melalui Setelan > Aplikasi > ClipMaster AI > Notifikasi")
+            }
+        }
+
     private val outputPicker =
         registerForActivityResult(ActivityResultContracts.CreateDocument("video/mp4")) { uri ->
             if (uri != null) startProcessing(uri)
@@ -74,6 +83,16 @@ class MainActivity : AppCompatActivity() {
         addLog("Mesin transkripsi: Whisper offline, bahasa Indonesia")
         addLog("Durasi default: 60 detik")
         addLog("Pilihan durasi: 30, 45, 60, 90 detik")
+        requestNotificationPermissionIfNeeded()
+    }
+
+    private fun requestNotificationPermissionIfNeeded() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
     }
 
     private fun buildInterface() {
