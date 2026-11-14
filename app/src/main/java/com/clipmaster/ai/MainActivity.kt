@@ -29,8 +29,11 @@ import kotlin.math.sqrt
 class MainActivity : AppCompatActivity() {
 
     private val executor = Executors.newSingleThreadExecutor()
-    private val clipSeconds = 30
+    private var clipSeconds = 60
     private val sampleRate = 16000
+
+    private val durations = listOf(30, 45, 60, 90)
+
     private val modelUrl =
         "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q5_1.bin"
 
@@ -42,6 +45,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var logText: TextView
     private lateinit var pickButton: Button
     private lateinit var createButton: Button
+    private lateinit var durationSpinner: Spinner
 
     private val videoPicker =
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
@@ -64,19 +68,22 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         buildInterface()
-        addLog("ClipMaster AI 3.0.0 siap")
+        addLog("ClipMaster AI 3.1.0 siap")
         addLog("MODE: AUTO PODCAST HIGHLIGHT")
         addLog("Mesin transkripsi: Whisper offline, bahasa Indonesia")
-        addLog("Model diunduh satu kali; proses berikutnya dapat offline")
+        addLog("Durasi default: 60 detik")
+        addLog("Pilihan durasi: 30, 45, 60, 90 detik")
     }
 
     private fun buildInterface() {
         val scroll = ScrollView(this)
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(24, 28, 24, 24)
             setBackgroundColor(android.graphics.Color.rgb(12, 18, 32))
         }
+
         scroll.addView(root)
 
         root.addView(TextView(this).apply {
@@ -87,7 +94,7 @@ class MainActivity : AppCompatActivity() {
         })
 
         root.addView(TextView(this).apply {
-            text = "OFFLINE WHISPER • SMART HIGHLIGHT • 30 DETIK"
+            text = "OFFLINE WHISPER • SMART HIGHLIGHT • V3.1"
             textSize = 12f
             gravity = Gravity.CENTER
             setTextColor(android.graphics.Color.LTGRAY)
@@ -109,14 +116,52 @@ class MainActivity : AppCompatActivity() {
         root.addView(videoInfo)
 
         root.addView(TextView(this).apply {
-            text = "AUTO PODCAST HIGHLIGHT 30 DETIK"
+            text = "PILIH DURASI AUTO CLIP"
             textSize = 14f
             setTextColor(android.graphics.Color.WHITE)
-            setPadding(0, 12, 0, 8)
+            setPadding(0, 14, 0, 8)
+        })
+
+        durationSpinner = Spinner(this)
+
+        val durationAdapter = ArrayAdapter(
+            this,
+            android.R.layout.simple_spinner_item,
+            durations.map { "$it detik" }
+        ).apply {
+            setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+        }
+
+        durationSpinner.adapter = durationAdapter
+        durationSpinner.setSelection(durations.indexOf(60))
+
+        durationSpinner.onItemSelectedListener =
+            object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(
+                    parent: AdapterView<*>?,
+                    view: android.view.View?,
+                    position: Int,
+                    id: Long
+                ) {
+                    clipSeconds = durations[position]
+                    createButton.text = "BUAT AUTO CLIP $clipSeconds DETIK"
+                    addLog("Durasi klip dipilih: $clipSeconds detik")
+                }
+
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+
+        root.addView(durationSpinner, buttonParams())
+
+        root.addView(TextView(this).apply {
+            text = "AUTO PODCAST HIGHLIGHT"
+            textSize = 14f
+            setTextColor(android.graphics.Color.WHITE)
+            setPadding(0, 16, 0, 8)
         })
 
         root.addView(TextView(this).apply {
-            text = "ClipMaster mencari beberapa bagian percakapan, mengubahnya menjadi teks bahasa Indonesia, lalu memberi skor pada kalimat, pertanyaan, dan alur percakapan. Hasil tetap berupa satu video MP4."
+            text = "ClipMaster mencari beberapa bagian percakapan, mengubahnya menjadi teks bahasa Indonesia, lalu memberi skor pada kalimat, pertanyaan, dan alur percakapan. Hasil berupa satu video MP4 sesuai durasi pilihan."
             textSize = 14f
             setTextColor(android.graphics.Color.rgb(190, 205, 225))
             setPadding(14, 14, 14, 14)
@@ -124,9 +169,10 @@ class MainActivity : AppCompatActivity() {
         })
 
         createButton = Button(this).apply {
-            text = "BUAT AUTO CLIP 30 DETIK"
+            text = "BUAT AUTO CLIP 60 DETIK"
             setOnClickListener { requestOutputFile() }
         }
+
         val cp = buttonParams()
         cp.topMargin = 20
         root.addView(createButton, cp)
@@ -155,6 +201,7 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(android.graphics.Color.rgb(20, 29, 45))
             setTextIsSelectable(true)
         }
+
         root.addView(
             logText,
             LinearLayout.LayoutParams(
@@ -189,6 +236,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun getFileName(uri: Uri): String {
         var name = "video.mp4"
+
         contentResolver.query(
             uri,
             arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
@@ -200,18 +248,19 @@ class MainActivity : AppCompatActivity() {
                 val i = cursor.getColumnIndex(
                     android.provider.OpenableColumns.DISPLAY_NAME
                 )
-                if (i >= 0) {
-                    name = cursor.getString(i) ?: name
-                }
+                if (i >= 0) name = cursor.getString(i) ?: name
             }
         }
+
         return name
     }
 
     private fun getVideoDuration(uri: Uri): String {
         val retriever = android.media.MediaMetadataRetriever()
+
         return try {
             retriever.setDataSource(this, uri)
+
             val ms = retriever.extractMetadata(
                 android.media.MediaMetadataRetriever.METADATA_KEY_DURATION
             )?.toLongOrNull() ?: 0L
@@ -240,7 +289,8 @@ class MainActivity : AppCompatActivity() {
             ).show()
             return
         }
-        outputPicker.launch("ClipMaster_PodcastHighlight_30s.mp4")
+
+        outputPicker.launch("ClipMaster_PodcastHighlight_${clipSeconds}s.mp4")
     }
 
     private fun addLog(message: String) {
@@ -262,11 +312,8 @@ class MainActivity : AppCompatActivity() {
 
             statusText.text = message
             statusText.setTextColor(
-                if (success) {
-                    android.graphics.Color.GREEN
-                } else {
-                    android.graphics.Color.RED
-                }
+                if (success) android.graphics.Color.GREEN
+                else android.graphics.Color.RED
             )
         }
     }
@@ -276,11 +323,7 @@ class MainActivity : AppCompatActivity() {
         val seconds =
             session.mediaInformation?.duration?.toDoubleOrNull() ?: 0.0
 
-        return if (seconds > 0.0) {
-            (seconds * 1000).toLong()
-        } else {
-            0L
-        }
+        return if (seconds > 0.0) (seconds * 1000).toLong() else 0L
     }
 
     private fun extractPcm16k(input: File, pcm: File): Boolean {
@@ -291,6 +334,7 @@ class MainActivity : AppCompatActivity() {
             "-y -i \"${input.absolutePath}\" -map 0:a:0 -vn -ac 1 -ar 16000 -c:a pcm_s16le -f s16le \"${pcm.absolutePath}\""
 
         val session = FFmpegKit.execute(command)
+
         addLog("Ekstraksi audio selesai. Return code: ${session.returnCode}")
 
         if (!ReturnCode.isSuccess(session.returnCode)) {
@@ -321,11 +365,7 @@ class MainActivity : AppCompatActivity() {
                 var read = 0
 
                 while (read < buffer.size) {
-                    val n = input.read(
-                        buffer,
-                        read,
-                        buffer.size - read
-                    )
+                    val n = input.read(buffer, read, buffer.size - read)
                     if (n < 0) break
                     read += n
                 }
@@ -353,9 +393,11 @@ class MainActivity : AppCompatActivity() {
         addLog("Jumlah jendela audio: ${rmsValues.size}")
 
         val clipWindows = (clipSeconds / windowSeconds).toInt()
+
         if (rmsValues.size < clipWindows) return emptyList()
 
         val prefix = DoubleArray(rmsValues.size + 1)
+
         for (i in rmsValues.indices) {
             prefix[i + 1] = prefix[i] + rmsValues[i]
         }
@@ -368,6 +410,7 @@ class MainActivity : AppCompatActivity() {
             val average = (prefix[end] - prefix[start]) / clipWindows
 
             var active = 0
+
             for (i in start until end) {
                 if (rmsValues[i] >= 0.012) active++
             }
@@ -400,6 +443,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         addLog("Kandidat audio yang akan diperiksa: ${chosen.size}")
+        addLog("Durasi setiap kandidat: $clipSeconds detik")
+
         return chosen
     }
 
@@ -503,7 +548,7 @@ class MainActivity : AppCompatActivity() {
                 .count()
         }
 
-        val wordScore = min(words.size, 55) * 0.55
+        val wordScore = min(words.size, 150) * 0.35
         val diversityScore = uniqueRatio * 12.0
 
         return wordScore +
@@ -525,6 +570,7 @@ class MainActivity : AppCompatActivity() {
         addLog("Memuat model Whisper ke memori")
 
         val context = WhisperNative.initModel(model.absolutePath)
+
         if (context == 0L) {
             throw Exception("Whisper gagal memuat model")
         }
@@ -566,7 +612,7 @@ class MainActivity : AppCompatActivity() {
 
                     val score =
                         transcriptScore(transcript) +
-                        candidate.audioScore * 8.0
+                            candidate.audioScore * 8.0
 
                     val preview =
                         transcript.replace("\n", " ").take(180)
@@ -606,12 +652,12 @@ class MainActivity : AppCompatActivity() {
 
         val command =
             "-y -ss $ss -i \"${input.absolutePath}\" -t $tt " +
-            "-map 0:v:0 -map 0:a? " +
-            "-c:v libopenh264 -b:v 4000k -pix_fmt yuv420p " +
-            "-c:a aac -b:a 128k -movflags +faststart " +
-            "\"${output.absolutePath}\""
+                "-map 0:v:0 -map 0:a? " +
+                "-c:v libopenh264 -b:v 4000k -pix_fmt yuv420p " +
+                "-c:a aac -b:a 128k -movflags +faststart " +
+                "\"${output.absolutePath}\""
 
-        addLog("Mengekspor MP4 dengan FFmpeg")
+        addLog("Mengekspor MP4 berdurasi $duration detik")
 
         val session = FFmpegKit.execute(command)
 
@@ -627,17 +673,19 @@ class MainActivity : AppCompatActivity() {
 
     private fun startProcessing(outputUri: Uri) {
         val inputUri = selectedUri ?: return
+        val selectedDuration = clipSeconds
 
         pickButton.isEnabled = false
         createButton.isEnabled = false
+        durationSpinner.isEnabled = false
 
         statusText.text = "Status: Memproses..."
         statusText.setTextColor(android.graphics.Color.YELLOW)
         logText.text = ""
 
         addLog("--------------------------------")
-        addLog("MEMULAI AUTO HIGHLIGHT 3.0")
-        addLog("Target durasi: 30 detik")
+        addLog("MEMULAI AUTO HIGHLIGHT 3.1")
+        addLog("Target durasi: $selectedDuration detik")
 
         executor.execute {
             val input = File(cacheDir, "clipmaster_input.mp4")
@@ -668,6 +716,7 @@ class MainActivity : AppCompatActivity() {
                 addLog("Input siap: ${input.length()} bytes")
 
                 val durationMs = getDurationMs(input)
+
                 if (durationMs <= 0L) {
                     throw Exception("Durasi video tidak dapat dibaca")
                 }
@@ -681,13 +730,13 @@ class MainActivity : AppCompatActivity() {
                 )
 
                 val clipDuration = min(
-                    clipSeconds.toDouble(),
+                    selectedDuration.toDouble(),
                     duration
                 )
 
                 var chosenStart = 0.0
 
-                if (duration > clipSeconds) {
+                if (duration > selectedDuration) {
                     if (!extractPcm16k(input, pcm)) {
                         throw Exception("Audio gagal diekstrak")
                     }
@@ -703,21 +752,23 @@ class MainActivity : AppCompatActivity() {
                     } catch (e: Exception) {
                         addLog("Whisper tidak tersedia: ${e.message}")
                         addLog(
-                            "Fallback: memakai skor aktivitas audio versi lama"
+                            "Fallback: memakai skor aktivitas audio"
                         )
                         candidates.first().startSeconds
                     }
                 } else {
                     addLog(
-                        "Video kurang dari 30 detik; memakai seluruh durasi"
+                        "Video lebih pendek dari pilihan; memakai seluruh durasi"
                     )
                 }
 
                 addLog(
-                    "Bagian terpilih: " +
+                    "Bagian terpilih mulai: " +
                         String.format(Locale.US, "%.2f", chosenStart) +
                         " detik"
                 )
+
+                addLog("Durasi hasil: $clipDuration detik")
 
                 if (!exportClip(input, output, chosenStart, clipDuration)) {
                     throw Exception("Ekspor FFmpeg gagal")
@@ -752,6 +803,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     pickButton.isEnabled = true
                     createButton.isEnabled = true
+                    durationSpinner.isEnabled = true
                 }
             }
         }
