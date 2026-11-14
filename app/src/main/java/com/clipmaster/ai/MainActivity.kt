@@ -656,7 +656,7 @@ class MainActivity : AppCompatActivity() {
         val pcm = File(cacheDir, "clipmaster_caption_audio.pcm")
         val ss = String.format(Locale.US, "%.3f", start)
         val tt = String.format(Locale.US, "%.3f", duration)
-        val cmd = "-y -ss $ss -i \"\${input.absolutePath}\" -t $tt -map 0:a:0 -vn -ac 1 -ar 16000 -c:a pcm_s16le -f s16le \"\${pcm.absolutePath}\""
+        val cmd = "-y -ss $ss -i \"${input.absolutePath}\" -t $tt -map 0:a:0 -vn -ac 1 -ar 16000 -c:a pcm_s16le -f s16le \"${pcm.absolutePath}\""
         val audioSession = FFmpegKit.execute(cmd)
         if (!ReturnCode.isSuccess(audioSession.returnCode) || !pcm.exists() || pcm.length() < 2L) {
             addLog("Audio caption tidak tersedia; ekspor tanpa caption")
@@ -666,7 +666,7 @@ class MainActivity : AppCompatActivity() {
         val context = try {
             WhisperNative.initModel(ensureWhisperModel().absolutePath)
         } catch (e: Exception) {
-            addLog("Model caption gagal disiapkan: \${e.message}")
+            addLog("Model caption gagal disiapkan: ${e.message}")
             pcm.delete()
             return null
         }
@@ -718,7 +718,7 @@ class MainActivity : AppCompatActivity() {
             addLog("Caption karaoke tersinkron dibuat")
             return ass
         } catch (e: Exception) {
-            addLog("Caption gagal: \${e.message}")
+            addLog("Caption gagal: ${e.message}")
             return null
         } finally {
             WhisperNative.freeModel(context)
@@ -744,7 +744,7 @@ class MainActivity : AppCompatActivity() {
         } else ""
 
         val command =
-            "-y -ss $ss -i \"\${input.absolutePath}\" -t $tt " +
+            "-y -ss $ss -i \"${input.absolutePath}\" -t $tt " +
                 captionFilter +
                 "-map 0:v:0 -map 0:a? " +
                 "-c:v libopenh264 -b:v 4000k -pix_fmt yuv420p " +
