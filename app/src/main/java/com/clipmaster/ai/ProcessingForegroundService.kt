@@ -12,6 +12,7 @@ import android.os.IBinder
 /**
  * Keeps the app process in foreground priority while the existing processing
  * pipeline runs, so minimizing the Activity does not stop Whisper/FFmpeg work.
+ * The ongoing notification makes the active processing state visible to users.
  */
 class ProcessingForegroundService : Service() {
 
