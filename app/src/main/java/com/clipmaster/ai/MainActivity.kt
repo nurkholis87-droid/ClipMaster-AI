@@ -788,6 +788,16 @@ class MainActivity : AppCompatActivity() {
         addLog("MEMULAI AUTO HIGHLIGHT 3.1")
         addLog("Target durasi: $selectedDuration detik")
 
+        // Promote the app to foreground-service priority before starting long
+        // Whisper/FFmpeg work. This keeps processing alive when the Activity is minimized.
+        startForegroundService(
+            Intent(this, ProcessingForegroundService::class.java).apply {
+                action = ProcessingForegroundService.ACTION_START
+            }
+        )
+
+        addLog("Layanan background aktif; aplikasi boleh diminimize")
+
         executor.execute {
             val input = File(cacheDir, "clipmaster_input.mp4")
             val pcm = File(cacheDir, "clipmaster_audio_16k.pcm")
@@ -904,6 +914,7 @@ class MainActivity : AppCompatActivity() {
                 input.delete()
                 pcm.delete()
                 output.delete()
+                stopService(Intent(this@MainActivity, ProcessingForegroundService::class.java))
 
                 runOnUiThread {
                     pickButton.isEnabled = true
