@@ -456,7 +456,7 @@ class ClipProcessor(
             if (ass != null) {
                 val escaped = ass.absolutePath.replace("\\", "\\\\").replace(":", "\\:")
                 "-vf \"subtitles='$escaped'\" "
-            } else ""
+            } else throw Exception("Caption aktif tetapi file subtitle tidak berhasil dibuat")
         } else ""
 
         val command =
@@ -467,6 +467,7 @@ class ClipProcessor(
                 "-c:a aac -b:a 128k -movflags +faststart " +
                 "\"${output.absolutePath}\""
 
+        if (captionsEnabled) log("Caption WAJIB disematkan ke MP4; ekspor dibatalkan jika subtitle gagal")
         if (captionsEnabled) log("Caption WAJIB disematkan ke MP4; ekspor dibatalkan jika subtitle gagal")
         log("Mengekspor MP4 berdurasi $duration detik")
 
