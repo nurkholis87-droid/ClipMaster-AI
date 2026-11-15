@@ -374,19 +374,16 @@ class ClipProcessor(
                 val cmd = "-y -ss $ss -i \"${input.absolutePath}\" -t $tt -map 0:a:0 -vn -ac 1 -ar 16000 -c:a pcm_s16le -f s16le \"${pcm.absolutePath}\""
                 val audioSession = FFmpegKit.execute(cmd)
                 if (!ReturnCode.isSuccess(audioSession.returnCode) || !pcm.exists() || pcm.length() < 2L) {
-                    log("Audio caption tidak tersedia; ekspor tanpa caption")
-                    return null
+                    throw Exception("Audio caption tidak tersedia: FFmpeg gagal mengekstrak audio (${audioSession.returnCode}). ${audioSession.allLogsAsString ?: ""}")
                 }
 
                 context = try {
                     WhisperNative.initModel(ensureWhisperModel().absolutePath)
                 } catch (e: OutOfMemoryError) {
-                    log("Memori tidak cukup untuk memuat model caption; lanjut ekspor tanpa caption")
-                    return null
+                    throw Exception("Memori tidak cukup untuk memuat model Whisper saat membuat caption")
                 }
                 if (context == 0L) {
-                    log("Model caption gagal dimuat; ekspor tanpa caption")
-                    return null
+                    throw Exception("Model Whisper gagal dimuat untuk membuat caption")
                 }
                 val bytes = pcm.readBytes()
                 val buffer = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
@@ -394,7 +391,7 @@ class ClipProcessor(
                 WhisperNative.transcribeTimed(context, audio)
             }
 
-            if (timed.isBlank()) return null
+            if (timed.isBlank()) throw Exception("Whisper menghasilkan transkrip kosong; caption tidak dapat dibuat")
             fun stamp(value: Double): String {
                 val cs = (value.coerceAtLeast(0.0) * 100.0).toLong()
                 return String.format(Locale.US, "%d:%02d:%02d.%02d",
@@ -421,7 +418,7 @@ class ClipProcessor(
                     .append(stamp(until)).append(",Default,,0,0,0,,")
                     .append(text).append('\n')
             }
-            if (events.isEmpty()) return null
+            if (events.isEmpty()) throw Exception("Tidak ada segmen bertimestamp valid untuk file caption ASS")
             val header = listOf(
                 "[Script Info]", "ScriptType: v4.00+", "PlayResX: 1080", "PlayResY: 1920",
                 "WrapStyle: 2", "ScaledBorderAndShadow: yes", "",
@@ -435,11 +432,9 @@ class ClipProcessor(
             log("Caption karaoke tersinkron dibuat")
             return ass
         } catch (e: OutOfMemoryError) {
-            log("Memori tidak cukup saat membuat caption; video akan diekspor tanpa caption")
-            return null
+            throw Exception("Memori tidak cukup saat membuat caption ASS", e)
         } catch (e: Exception) {
-            log("Caption gagal: ${e.message}")
-            return null
+            throw Exception("Pembuatan caption gagal: ${e.message}", e)
         } finally {
             if (context != 0L) WhisperNative.freeModel(context)
             pcm?.delete()
@@ -461,7 +456,7 @@ class ClipProcessor(
             if (ass != null) {
                 val escaped = ass.absolutePath.replace("\\", "\\\\").replace(":", "\\:")
                 "-vf \"subtitles='$escaped'\" "
-            } else ""
+            } else throw Exception("Caption aktif tetapi file subtitle tidak berhasil dibuat")
         } else ""
 
         val command =
@@ -472,6 +467,8 @@ class ClipProcessor(
                 "-c:a aac -b:a 128k -movflags +faststart " +
                 "\"${output.absolutePath}\""
 
+        if (captionsEnabled) log("Caption WAJIB disematkan ke MP4; ekspor dibatalkan jika subtitle gagal")
+        if (captionsEnabled) log("Caption WAJIB disematkan ke MP4; ekspor dibatalkan jika subtitle gagal")
         log("Mengekspor MP4 berdurasi $duration detik")
 
         val session = FFmpegKit.execute(command)
