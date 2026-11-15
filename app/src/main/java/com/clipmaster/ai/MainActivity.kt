@@ -1,7 +1,10 @@
 package com.clipmaster.ai
 
 import android.app.Activity
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
@@ -9,6 +12,7 @@ import android.view.ViewGroup
 import android.widget.*
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.FFprobeKit
 import com.arthenica.ffmpegkit.ReturnCode
@@ -22,13 +26,11 @@ import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.Locale
-import java.util.concurrent.Executors
 import kotlin.math.min
 import kotlin.math.sqrt
 
 class MainActivity : AppCompatActivity() {
 
-    private val executor = Executors.newSingleThreadExecutor()
     private var clipSeconds = 60
     private var captionsEnabled = true
     private val sampleRate = 16000
@@ -53,6 +55,14 @@ class MainActivity : AppCompatActivity() {
             if (result.resultCode == Activity.RESULT_OK) {
                 result.data?.data?.let { uri ->
                     selectedUri = uri
+                    val grantFlags = (result.data?.flags ?: 0) and
+                        (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                    if (grantFlags != 0) {
+                        try {
+                            contentResolver.takePersistableUriPermission(uri, grantFlags)
+                        } catch (_: SecurityException) {
+                        }
+                    }
                     selectedName = getFileName(uri)
                     videoInfo.text = "Video: $selectedName\nDurasi: ${getVideoDuration(uri)}"
                     addLog("Video dipilih: $selectedName")
@@ -798,164 +808,77 @@ class MainActivity : AppCompatActivity() {
         return output.exists() && output.length() > 0
     }
 
-    private fun startProcessing(outputUri: Uri) {
-        val inputUri = selectedUri ?: return
-        val selectedDuration = clipSeconds
 
-        pickButton.isEnabled = false
-        createButton.isEnabled = false
-        durationSpinner.isEnabled = false
-
-        statusText.text = "Status: Memproses..."
-        statusText.setTextColor(android.graphics.Color.YELLOW)
-        logText.text = ""
-
-        addLog("--------------------------------")
-        addLog("MEMULAI AUTO HIGHLIGHT 3.1")
-        addLog("Target durasi: $selectedDuration detik")
-
-        // Promote the app to foreground-service priority before starting long
-        // Whisper/FFmpeg work. This keeps processing alive when the Activity is minimized.
-        startForegroundService(
-            Intent(this, ProcessingForegroundService::class.java).apply {
-                action = ProcessingForegroundService.ACTION_START
+    private val processingReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != ProcessingForegroundService.ACTION_PROGRESS) return
+            intent.getStringExtra(ProcessingForegroundService.EXTRA_LOG)?.let { addLog(it) }
+            intent.getStringExtra(ProcessingForegroundService.EXTRA_STATUS)?.let {
+                updateStatus(it, intent.getBooleanExtra(ProcessingForegroundService.EXTRA_SUCCESS, false))
             }
-        )
-
-        addLog("Layanan background aktif; aplikasi boleh diminimize")
-
-        executor.execute {
-            val input = File(cacheDir, "clipmaster_input.mp4")
-            val pcm = File(cacheDir, "clipmaster_audio_16k.pcm")
-            val output = File(cacheDir, "clipmaster_output.mp4")
-
-            try {
-                input.delete()
-                pcm.delete()
-                output.delete()
-
-                addLog("Menyalin video ke penyimpanan sementara")
-
-                contentResolver.openInputStream(inputUri).use { source ->
-                    if (source == null) {
-                        throw Exception("Tidak dapat membaca video")
-                    }
-
-                    FileOutputStream(input).use { dest ->
-                        source.copyTo(dest)
-                    }
-                }
-
-                if (!input.exists() || input.length() == 0L) {
-                    throw Exception("Video sumber kosong")
-                }
-
-                addLog("Input siap: ${input.length()} bytes")
-
-                val durationMs = getDurationMs(input)
-
-                if (durationMs <= 0L) {
-                    throw Exception("Durasi video tidak dapat dibaca")
-                }
-
-                val duration = durationMs / 1000.0
-
-                addLog(
-                    "Durasi sumber: " +
-                        String.format(Locale.US, "%.1f", duration) +
-                        " detik"
-                )
-
-                val clipDuration = min(
-                    selectedDuration.toDouble(),
-                    duration
-                )
-
-                var chosenStart = 0.0
-                var selectedTimedTranscript: String? = null
-
-                if (duration > selectedDuration) {
-                    if (!extractPcm16k(input, pcm)) {
-                        throw Exception("Audio gagal diekstrak")
-                    }
-
-                    val candidates = findAudioCandidates(pcm)
-
-                    if (candidates.isEmpty()) {
-                        throw Exception("Tidak ditemukan kandidat audio")
-                    }
-
-                    chosenStart = try {
-                        val selection = transcribeCandidates(pcm, candidates)
-                        selectedTimedTranscript = selection.timedTranscript
-                        selection.startSeconds
-                    } catch (e: Exception) {
-                        addLog("Whisper tidak tersedia: ${e.message}")
-                        addLog(
-                            "Fallback: memakai skor aktivitas audio"
-                        )
-                        candidates.first().startSeconds
-                    }
-                } else {
-                    addLog(
-                        "Video lebih pendek dari pilihan; memakai seluruh durasi"
-                    )
-                }
-
-                addLog(
-                    "Bagian terpilih mulai: " +
-                        String.format(Locale.US, "%.2f", chosenStart) +
-                        " detik"
-                )
-
-                addLog("Durasi hasil: $clipDuration detik")
-
-                if (!exportClip(input, output, chosenStart, clipDuration, selectedTimedTranscript)) {
-                    throw Exception("Ekspor FFmpeg gagal")
-                }
-
-                addLog("Menyimpan hasil video")
-
-                contentResolver.openOutputStream(outputUri).use { dest ->
-                    if (dest == null) {
-                        throw Exception(
-                            "Lokasi penyimpanan tidak dapat dibuka"
-                        )
-                    }
-
-                    output.inputStream().use { source ->
-                        source.copyTo(dest)
-                    }
-                }
-
-                addLog("AUTO CLIP BERHASIL DISIMPAN")
-                updateStatus("Status: AUTO CLIP BERHASIL", true)
-
-            } catch (e: OutOfMemoryError) {
-                addLog("MEMORI HP TIDAK CUKUP: proses dihentikan dengan aman. Coba video lebih pendek atau nonaktifkan caption.")
-                updateStatus("Status: MEMORI TIDAK CUKUP", false)
-
-            } catch (e: Exception) {
-                addLog("ERROR: ${e.message}")
-                updateStatus("Status: GAGAL", false)
-
-            } finally {
-                input.delete()
-                pcm.delete()
-                output.delete()
-                stopService(Intent(this@MainActivity, ProcessingForegroundService::class.java))
-
-                runOnUiThread {
-                    pickButton.isEnabled = true
-                    createButton.isEnabled = true
-                    durationSpinner.isEnabled = true
-                }
+            if (intent.getBooleanExtra(ProcessingForegroundService.EXTRA_DONE, false)) {
+                setProcessingUi(false)
             }
         }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        executor.shutdown()
+    private fun setProcessingUi(processing: Boolean) {
+        pickButton.isEnabled = !processing
+        createButton.isEnabled = !processing
+        durationSpinner.isEnabled = !processing
     }
+
+    override fun onStart() {
+        super.onStart()
+        ContextCompat.registerReceiver(
+            this,
+            processingReceiver,
+            IntentFilter(ProcessingForegroundService.ACTION_PROGRESS),
+            ContextCompat.RECEIVER_NOT_EXPORTED
+        )
+        val prefs = getSharedPreferences(
+            ProcessingForegroundService.PREFS_NAME,
+            MODE_PRIVATE
+        )
+        setProcessingUi(prefs.getBoolean(ProcessingForegroundService.PREF_IS_PROCESSING, false))
+        prefs.getString(ProcessingForegroundService.PREF_STATUS, null)?.let {
+            updateStatus(it, prefs.getBoolean(ProcessingForegroundService.PREF_SUCCESS, false))
+        }
+    }
+
+    override fun onStop() {
+        unregisterReceiver(processingReceiver)
+        super.onStop()
+    }
+
+    private fun startProcessing(outputUri: Uri) {
+        val inputUri = selectedUri ?: return
+        val selectedDuration = clipSeconds
+
+        setProcessingUi(true)
+        statusText.text = "Status: Memproses di latar belakang..."
+        statusText.setTextColor(android.graphics.Color.YELLOW)
+        logText.text = ""
+        addLog("--------------------------------")
+        addLog("MEMULAI AUTO HIGHLIGHT 3.2")
+        addLog("Target durasi: $selectedDuration detik")
+
+        try {
+            val serviceIntent = Intent(this, ProcessingForegroundService::class.java).apply {
+                action = ProcessingForegroundService.ACTION_START
+                putExtra(ProcessingForegroundService.EXTRA_INPUT_URI, inputUri.toString())
+                putExtra(ProcessingForegroundService.EXTRA_OUTPUT_URI, outputUri.toString())
+                putExtra(ProcessingForegroundService.EXTRA_DURATION, selectedDuration)
+                putExtra(ProcessingForegroundService.EXTRA_CAPTIONS, captionsEnabled)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            }
+            ContextCompat.startForegroundService(this, serviceIntent)
+            addLog("Layanan foreground mengambil alih seluruh proses; aplikasi boleh diminimize")
+        } catch (e: Exception) {
+            setProcessingUi(false)
+            updateStatus("Status: GAGAL MEMULAI LAYANAN", false)
+            addLog("Tidak dapat memulai layanan background: ${e.message}")
+        }
+    }
+
 }
